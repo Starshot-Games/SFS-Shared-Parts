@@ -1,0 +1,6 @@
+# Unity build artifacts (none expected here, but guard anyway)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+*.csproj
+*.sln

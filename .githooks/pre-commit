@@ -1,0 +1,10 @@
+#!/bin/sh
+# Scan staged files for anti-hack markers before allowing a commit (this is a PUBLIC repo).
+# The hook/checker scripts themselves contain the patterns, so exclude tooling paths.
+staged=$(git diff --cached --name-only --diff-filter=ACM | grep -v -e '^.githooks/' -e '^scripts/' -e '^README.md$')
+[ -z "$staged" ] && exit 0
+if printf '%s\n' "$staged" | tr '\n' '\0' | xargs -0 -r grep -lI -e 'PROTECTION' -e 'HashControlled' -e 'hash_capture' 2>/dev/null; then
+  echo "ERROR: anti-hack marker found in the files above. This is a PUBLIC repo; commit aborted." >&2
+  exit 1
+fi
+exit 0
