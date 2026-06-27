@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using SFS.Builds;
 using SFS.Variables;
 using SFS.World;
@@ -116,39 +115,6 @@ namespace SFS.Parts.Modules
             foreach (NozzleGlow n in nozzleGlows)
                 n.Apply(debugNozzleGlow);
         }
-
-        // Porting tool: pull data out of the legacy components found under this part and rebuild the
-        // EngineEffects arrays from them. Run once per part, then remove the old components.
-        [PropertySpace, HorizontalGroup("Legacy"), Button(ButtonSizes.Large, Name = "Copy From Legacy Components")]
-        void CopyFromLegacy()
-        {
-            nozzleGlows = GetComponentsInChildren<NozzleGlowModule>(true).Select(m => new NozzleGlow(m)).ToArray();
-
-            // Throttle variable lived on NozzleGlowModule.engineThrottle in the legacy setup
-            NozzleGlowModule legacyNozzle = GetComponentInChildren<NozzleGlowModule>(true);
-            if (legacyNozzle != null)
-            {
-                engineThrottle = legacyNozzle.engineThrottle;
-                nozzleGlow = legacyNozzle.glowIntensity; // glow save reference now lives on the parent
-                glowHeatUpTime = legacyNozzle.heatUpTime;
-                glowCoolDownTime = legacyNozzle.coolDownTime;
-            }
-
-            UnityEditor.EditorUtility.SetDirty(this);
-            Debug.Log($"EngineEffects: copied {flameMeshes.Length} flame mesh(es), {flameGlows.Length} glow(s), {nozzleGlows.Length} nozzle glow(s) from legacy components.");
-        }
-
-        // Strips the now-redundant legacy driver components. FlameRandomizer is intentionally kept.
-        [HorizontalGroup("Legacy"), Button(ButtonSizes.Large, Name = "Remove Legacy Components")]
-        void RemoveLegacy()
-        {
-            int removed = 0;
-            
-            foreach (NozzleGlowModule m in GetComponentsInChildren<NozzleGlowModule>(true)) { DestroyImmediate(m); removed++; }
-
-            UnityEditor.EditorUtility.SetDirty(this);
-            Debug.Log($"EngineEffects: removed {removed} legacy component(s) (FlameRandomizer kept).");
-        }
         #endif
     }
 
@@ -158,18 +124,15 @@ namespace SFS.Parts.Modules
     {
         static readonly int GlowIntensity = Shader.PropertyToID("_GlowIntensity");
 
-        public NozzleGlowModule.GlowMesh[] meshes;
-
-        public NozzleGlow() { }
-        public NozzleGlow(NozzleGlowModule m) => meshes = m.meshes;
-
+        public GlowMesh[] meshes;
+        
         public void Apply(float glow)
         {
             if (meshes == null)
                 return;
 
             float intensity = Mathf.Pow(glow, 2.2f);
-            foreach (NozzleGlowModule.GlowMesh mesh in meshes)
+            foreach (GlowMesh mesh in meshes)
             {
                 if (mesh == null || mesh.mesh == null)
                     continue;
@@ -184,6 +147,13 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(GlowIntensity, intensity * mesh.intensityMultiplier);
                 meshRenderer.SetPropertyBlock(propertyBlock, Index);
             }
+        }
+        
+        [Serializable]
+        public class GlowMesh
+        {
+            public MeshRenderer mesh;
+            public float intensityMultiplier = 1;
         }
     }
 }

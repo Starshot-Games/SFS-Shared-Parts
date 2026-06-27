@@ -137,7 +137,8 @@ namespace SFS.Parts.Modules
                 turnAxis_Input.OnChange += RecalculateGimbal;
             }
             
-            heatHolder.gameObject.SetActive(true);
+            if (!multipleNozzles)
+                heatHolder.SetActive(true);
             
             if (GameManager.main != null)
             {
