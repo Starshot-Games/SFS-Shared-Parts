@@ -34,13 +34,8 @@ namespace SFS.Parts.Modules
         float vacuum;
 
 
-        void Start() => RunStart();
-
-        public void RunStart()
-        {
-            Clear();
-        }
-
+        void Start() => Clear();
+        
         void Update()
         {
             #if UNITY_EDITOR
@@ -51,7 +46,7 @@ namespace SFS.Parts.Modules
             }
             #endif
 
-            if (GameManager.main == null && BuildManager.main == null)
+            if (GameManager.main == null)
                 return;
                 
             vacuum = GetVacuum();

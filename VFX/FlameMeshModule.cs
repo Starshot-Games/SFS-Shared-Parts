@@ -288,7 +288,6 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(StripesStrength, stripesStrength);
 
                 a.meshRenderer.SetPropertyBlock(propertyBlock, 0);
-                a.meshRenderer.SetPropertyBlock(propertyBlock, 1);
             }
         }
         
