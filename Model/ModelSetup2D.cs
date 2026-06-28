@@ -1,6 +1,8 @@
 using Sirenix.OdinInspector;
 using UnityEngine;
 
+// only reference non-generated meshes, 
+
 namespace SFS.Parts.Modules
 {
     public class ModelSetup2D : MonoBehaviour, I_InitializePartModule
@@ -9,12 +11,12 @@ namespace SFS.Parts.Modules
         static readonly int DepthM = Shader.PropertyToID("_DepthM");
 
         public MeshRenderer[] meshRenderers;
-
-
+        
+        
         [Button(ButtonSizes.Large)]
         public void GetRenderers() => meshRenderers = GetComponentsInChildren<MeshRenderer>();
         void Reset() => GetRenderers();
-
+        
         // Changes depth layer and re-generates mesh
         string sortingLayer;
         public void SetSortingLayer(string sortingLayer)
@@ -22,7 +24,7 @@ namespace SFS.Parts.Modules
             this.sortingLayer = sortingLayer;
             SetMesh();
         }
-
+        
         public void SetMesh()
         {
             foreach (MeshRenderer r in meshRenderers)
@@ -46,9 +48,7 @@ namespace SFS.Parts.Modules
         }
         
         public static float GetGlobalDepth(float depth, string sortingLayer)
-        {
-            return RenderSortingManager.main != null ? RenderSortingManager.main.GetGlobalDepth(depth, sortingLayer) : depth;
-        }
+            => RenderSortingManager.main != null ? RenderSortingManager.main.GetGlobalDepth(depth, sortingLayer) : depth;
         
         int I_InitializePartModule.Priority => 0;
         void I_InitializePartModule.Initialize() => SetMesh();
