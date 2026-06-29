@@ -53,7 +53,7 @@ namespace SFS.Parts.Modules
 
         #if UNITY_EDITOR
         // Flat grid plane (xVertices * yVertices). Width 1 (x: -0.5..0.5), height 0..-1.
-        [PropertySpace, Button(ButtonSizes.Medium, Name = "Create 2D Mesh Asset")]
+        [FoldoutGroup("Create Mesh"), Button(ButtonSizes.Medium, Name = "Create 2D Mesh Asset")]
         void Create2DMesh(int xVertices = 2, int yVertices = 32)
         {
             string name = $"Flame Flat {xVertices}x{yVertices}";
@@ -63,7 +63,7 @@ namespace SFS.Parts.Modules
         }
 
         // Cylinder (sides around, yVertices tall). Width 1 (radius 0.5), height 0..-1.
-        [Button(ButtonSizes.Medium, Name = "Create 3D Mesh Asset")]
+        [FoldoutGroup("Create Mesh"), Button(ButtonSizes.Medium, Name = "Create 3D Mesh Asset")]
         void Create3DMesh(int sides = 12, int yVertices = 32, bool capTop = false)
         {
             string name = $"Flame Cylinder {sides}x{yVertices}" + (capTop ? " Capped" : "");
@@ -73,7 +73,7 @@ namespace SFS.Parts.Modules
         }
 
         // Copies a mesh (e.g. the mach diamonds mesh) with its UV0 and UV1 channels swapped
-        [Button(ButtonSizes.Medium, Name = "Copy Mesh (Swap UV0/UV1)")]
+        [FoldoutGroup("Create Mesh"), Button(ButtonSizes.Medium, Name = "Copy Mesh (Swap UV0/UV1)")]
         void CopyMeshSwapUVs(Mesh source)
         {
             if (source == null)
@@ -98,7 +98,7 @@ namespace SFS.Parts.Modules
         // Flat (2D) version of the stacked-diamond mesh: diamondCount rhombi down y 0..-1, single sheet (z = 0).
         // Each diamond = top tip (x=0) -> wide middle (x: -0.5..0.5) -> bottom tip (x=0), matching the 3D bipyramid layout.
         // uv0 = (across, global height), uv1 = (across, local per-diamond: top 1 / mid 0.5 / bottom 0).
-        [Button(ButtonSizes.Medium, Name = "Create 2D Diamond Mesh")]
+        [FoldoutGroup("Create Mesh"), Button(ButtonSizes.Medium, Name = "Create 2D Diamond Mesh")]
         void Create2DDiamondMesh(int diamondCount = 5, int columns = 10)
         {
             int cols = Mathf.Max(columns, 2);

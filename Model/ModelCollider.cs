@@ -303,7 +303,7 @@ namespace SFS.Parts.Modules
 
                 // Black outline underlay, then colored line on top
                 DrawLoop(world, new Color(0, 0, 0, 0.7f), 4);
-                DrawLoop(world, Color.white, 1.5f);
+                DrawLoop(world, Color.magenta, 1.5f);
             }
         }
         static void DrawLoop(Vector3[] world, Color color, float thickness)
