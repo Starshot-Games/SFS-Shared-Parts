@@ -31,6 +31,7 @@ namespace SFS.Parts.Modules
 
         // Patch
         [Required] public GameObject heatHolder;
+        [Required] public GameObject heatHitbox;
         Vector3 originalPosition;
 
 
@@ -105,7 +106,11 @@ namespace SFS.Parts.Modules
             dryMassPercent.OnChange += RecalculateMass;
             fuelPercent.OnChange += RecalculateMass;
 
-            throttle_Out.OnChange += () => heatHolder.SetActive(throttle_Out.Value > 0);
+            throttle_Out.OnChange += () =>
+            {
+                heatHolder.SetActive(throttle_Out.Value > 0);
+                heatHitbox.transform.localScale = new Vector3(1, throttle_Out.Value, 1);
+            };
         }
 
         void RecalculateMass()
@@ -133,7 +138,11 @@ namespace SFS.Parts.Modules
         }
 
         void PositionFlameHitbox(Vector2 _) => PositionFlameHitbox();
-        void PositionFlameHitbox() => heatHolder.transform.localPosition = originalPosition + heatHolder.transform.parent.InverseTransformVector(Rocket.rb2d.linearVelocity * Time.fixedDeltaTime);
+        void PositionFlameHitbox()
+        {
+            // Physics simulation is one frame behind, this fixes it
+            heatHolder.transform.localPosition = originalPosition + heatHolder.transform.parent.InverseTransformVector(Rocket.rb2d.linearVelocity * Time.fixedDeltaTime);
+        }
 
 
         // Activation
@@ -149,6 +158,7 @@ namespace SFS.Parts.Modules
             if (!enabled)
                 MsgDrawer.main.Log(boosterPrimed.Value ? Loc.main.Booster_On : Loc.main.Booster_Off);
 
+            // Old code from career attempt...
             /*
             // Regular
             if (CareerState.main.HasFeature(WorldSave.CareerState.throttleFeature))

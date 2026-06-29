@@ -127,10 +127,10 @@ namespace Parts
                     {
                         if (e.multipleNozzles)
                         {
-                            foreach (GameObject heatHolder in e.heatHolders)
+                            foreach (HeatHitbox hitbox in e.heatHitboxes)
                             {
-                                DrawBoxCollider(heatHolder.GetComponent<BoxCollider2D>());   
-                                DrawBoxCollider(heatHolder.GetComponentInChildren<BoxCollider2D>());   
+                                DrawBoxCollider(hitbox.heatHolder.GetComponent<BoxCollider2D>());   
+                                DrawBoxCollider(hitbox.heatHitbox.GetComponent<BoxCollider2D>());   
                             }
                         }
                         else

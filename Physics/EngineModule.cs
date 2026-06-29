@@ -1,5 +1,5 @@
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using SFS.Builds;
 using SFS.Translations;
 using SFS.UI;
@@ -36,10 +36,10 @@ namespace SFS.Parts.Modules
         //
         public bool multipleNozzles;
         [HideIf(nameof(multipleNozzles)), Required] public GameObject heatHolder;
+        [HideIf(nameof(multipleNozzles)), Required] public GameObject heatHitbox;
         [HideIf(nameof(multipleNozzles))] Vector3 originalPosition;
         //
-        [ShowIf(nameof(multipleNozzles))] public GameObject[] heatHolders;
-        [ShowIf(nameof(multipleNozzles))] Vector3[] originalPositions;
+        [ShowIf(nameof(multipleNozzles))] public HeatHitbox[] heatHitboxes;
 
         
         // Data Injection
@@ -96,8 +96,14 @@ namespace SFS.Parts.Modules
                 }
             }
         }
-        
-        
+
+        void OnValidate()
+        {
+            if (!multipleNozzles)
+                if (heatHitbox == null)
+                    heatHitbox = heatHolder.transform.GetChild(0).gameObject;
+        }
+
         void Awake()
         {
             if (float.IsNaN(oldMass))
@@ -136,19 +142,36 @@ namespace SFS.Parts.Modules
                 throttle_Out.OnChange += RecalculateGimbal;
                 turnAxis_Input.OnChange += RecalculateGimbal;
             }
-            
-            if (!multipleNozzles)
-                heatHolder.SetActive(true);
+
+            OnValidate();
             
             if (GameManager.main != null)
             {
                 if (multipleNozzles)
-                    originalPositions = heatHolders.Select(h => h.transform.localPosition).ToArray();
+                    foreach (HeatHitbox hitbox in heatHitboxes)
+                        hitbox.originalPosition = hitbox.heatHolder.transform.localPosition;
                 else
                     originalPosition = heatHolder.transform.localPosition;
                 
                 WorldView.main.onVelocityOffset += PositionFlameHitbox;
             }
+            
+            throttle_Out.OnChange += () =>
+            {
+                if (multipleNozzles)
+                {
+                    foreach (HeatHitbox hitbox in heatHitboxes)
+                    {
+                        hitbox.heatHolder.SetActive(throttle_Out.Value > 0);
+                        hitbox.heatHitbox.transform.localScale = new Vector3(1, throttle_Out.Value, 1);   
+                    }
+                }
+                else
+                {
+                    heatHolder.SetActive(throttle_Out.Value > 0);
+                    heatHitbox.transform.localScale = new Vector3(1, throttle_Out.Value, 1);   
+                }
+            };
         }
         void OnDestroy()
         {
@@ -209,17 +232,20 @@ namespace SFS.Parts.Modules
         }
         void PositionFlameHitbox()
         {
-            if (!Base.sceneLoader.isUnloading)
+            if (Base.sceneLoader.isUnloading)
+                return;
+            
+            // Physics simulation is one frame behind, this fixes it
+            if (multipleNozzles)
             {
-                if (multipleNozzles)
-                    for (int i = 0; i < heatHolders.Length; i++)
-                    {
-                        Transform h = heatHolders[i].transform;
-                        h.localPosition = originalPositions[i] + h.parent.InverseTransformVector(Rb2d.linearVelocity * Time.fixedDeltaTime);
-                    }
-                else
-                    heatHolder.transform.localPosition = originalPosition + heatHolder.transform.parent.InverseTransformVector(Rb2d.linearVelocity * Time.fixedDeltaTime);
+                foreach (HeatHitbox hitbox in heatHitboxes)
+                {
+                    Transform h = hitbox.heatHolder.transform;
+                    h.localPosition = hitbox.originalPosition + h.parent.InverseTransformVector(Rb2d.linearVelocity * Time.fixedDeltaTime);
+                }
             }
+            else
+                heatHolder.transform.localPosition = originalPosition + heatHolder.transform.parent.InverseTransformVector(Rb2d.linearVelocity * Time.fixedDeltaTime);
         }
 
 
@@ -256,6 +282,13 @@ namespace SFS.Parts.Modules
             if (wasAlreadyNotBurning)
                 logger.Log(Loc.main.Engine_Module_State.InjectField(engineOn.Value.State_ToOnOff(), "state"));
         }
+    }
 
+    [Serializable, InlineProperty]
+    public class HeatHitbox
+    {
+        [Required] public GameObject heatHolder;
+        [Required] public GameObject heatHitbox;
+        [NonSerialized] public Vector3 originalPosition;
     }
 }
