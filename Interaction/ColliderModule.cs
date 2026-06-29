@@ -12,7 +12,7 @@ namespace SFS.Parts.Modules
     public class ColliderModule : MonoBehaviour, Rocket.INJ_Rocket
     {
         public ImpactTolerance impactTolerance = ImpactTolerance.Medium;
-        [LabelText("Ignored Heat Hitbox")] public Collider2D ownEngineNozzle;
+        [Tooltip("Prevents the flame heat hitbox from applying heating effects to the engine's own collider."), LabelText("Ignored Heat Hitbox")] public Collider2D ownEngineNozzle;
 
         // State
         int planetLayer, flameHeatLayer;

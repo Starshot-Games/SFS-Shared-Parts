@@ -34,9 +34,12 @@ namespace SFS.Parts.Modules
             {
                 PolygonCollider a = gameObject.AddComponent<PolygonCollider>();
                 a.polygon = this;
+                a.ownEngineNozzle = OwnEngineNozzle;
             }
         }
-        
+        // Collider to ignore for heat // Set on the physics collider when it's spawned
+        protected virtual Collider2D OwnEngineNozzle => null;
+
         public bool Click => clickArea && isActiveAndEnabled;
         public bool BuildCollider => colliderArea && isActiveAndEnabled;
         public bool BuildCollider_IncludeInactive => colliderArea;

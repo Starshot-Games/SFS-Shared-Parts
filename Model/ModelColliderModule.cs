@@ -8,9 +8,12 @@ using UnityEngine;
 namespace SFS.Parts.Modules
 {
     [HideMonoScript]
-    public class ModelCollider : PolygonData, I_InitializePartModule
+    public class ModelColliderModule : PolygonData, I_InitializePartModule
     {
         [Required] public MeshFilter mesh;
+
+        [Tooltip("Prevents the flame heat hitbox from applying heating effects to the engine's own collider."), LabelText("Ignored Heat Hitbox")] public Collider2D ownEngineNozzle;
+        protected override Collider2D OwnEngineNozzle => ownEngineNozzle;
 
         [BoxGroup("Detail Reduction", false), LabelText("Simplify Tolerance")] public float simplifyTolerance = 0.02f;
         [BoxGroup("Detail Reduction", false), LabelText("Merge Distance")] public float mergeDistance = 0.05f; // Bridge gaps between separate islands up to this size

@@ -100,7 +100,7 @@ namespace SFS.Parts.Modules
         void OnValidate()
         {
             if (!multipleNozzles)
-                if (heatHitbox == null)
+                if (heatHitbox == null && heatHolder != null && heatHolder.transform.childCount > 0)
                     heatHitbox = heatHolder.transform.GetChild(0).gameObject;
         }
 
