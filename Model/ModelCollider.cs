@@ -289,6 +289,10 @@ namespace SFS.Parts.Modules
         #if UNITY_EDITOR
         void OnDrawGizmosSelected()
         {
+            // Only when THIS object is itself selected — not when a parent is
+            if (!UnityEditor.Selection.Contains(gameObject))
+                return;
+            
             foreach (OutlineLoop loopData in outline)
             {
                 Vector2[] island = loopData.points;
@@ -299,7 +303,7 @@ namespace SFS.Parts.Modules
 
                 // Black outline underlay, then colored line on top
                 DrawLoop(world, new Color(0, 0, 0, 0.7f), 4);
-                DrawLoop(world, Color.cyan, 1.5f);
+                DrawLoop(world, Color.white, 1.5f);
             }
         }
         static void DrawLoop(Vector3[] world, Color color, float thickness)
