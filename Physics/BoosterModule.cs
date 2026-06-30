@@ -106,6 +106,9 @@ namespace SFS.Parts.Modules
             dryMassPercent.OnChange += RecalculateMass;
             fuelPercent.OnChange += RecalculateMass;
 
+            if (heatHitbox == null)
+                heatHitbox = heatHolder;
+
             throttle_Out.OnChange += () =>
             {
                 heatHolder.SetActive(throttle_Out.Value > 0);

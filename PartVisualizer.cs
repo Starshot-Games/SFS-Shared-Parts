@@ -244,15 +244,16 @@ namespace Parts
         [Button] void HideAllFlames() => ToggleFlames(false);
         void ToggleFlames(bool toggle)
         {
-            GetComponentsInChildren<UnityEngine.Transform>(true).Where(x => x.name == "Flame Holder").ForEach(x =>
-            {
-                UnityEngine.Transform x0 = x.GetChild(0);
-                
-                if (x0.name == "Flame")
-                    x0.gameObject.SetActive(toggle);
-            });
-            
-            GetComponentsInChildren<UnityEngine.Transform>(true).Where(x => x.name == "Flame Effect").ForEach(x => x.gameObject.SetActive(toggle));
+            debugThrottle = toggle ? 1 : 0;
+            ApplyDebugFlames();
+        }
+
+        [PropertySpace]
+        [Range(0, 1), OnValueChanged(nameof(ApplyDebugFlames))] public float debugThrottle = 1;
+        [Range(0, 1), OnValueChanged(nameof(ApplyDebugFlames))] public float debugVacuum;
+        void ApplyDebugFlames()
+        {
+            GetComponentsInChildren<EngineEffects>(true).ForEach(e => e.SetDebugState(debugThrottle, debugVacuum));
         }
         
         

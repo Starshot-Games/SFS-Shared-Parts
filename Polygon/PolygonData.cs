@@ -35,6 +35,9 @@ namespace SFS.Parts.Modules
                 PolygonCollider a = gameObject.AddComponent<PolygonCollider>();
                 a.polygon = this;
                 a.ownEngineNozzle = OwnEngineNozzle;
+                
+                // Sets layer to parts
+                a.gameObject.layer = LayerMask.NameToLayer("Parts");
             }
         }
         // Collider to ignore for heat // Set on the physics collider when it's spawned

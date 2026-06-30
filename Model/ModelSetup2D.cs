@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Sirenix.OdinInspector;
 using UnityEngine;
 
@@ -14,7 +16,17 @@ namespace SFS.Parts.Modules
         
         
         [Button(ButtonSizes.Large)]
-        public void GetRenderers() => meshRenderers = GetComponentsInChildren<MeshRenderer>();
+        public void GetRenderers()
+        {
+            // Flame meshes are driven by FlameMeshModule (generated effects) - exclude those.
+            HashSet<MeshRenderer> flameRenderers = new();
+            foreach (FlameMeshModule flame in GetComponentsInChildren<FlameMeshModule>(true))
+                foreach (FlameMeshModule.MeshRef meshRef in flame.meshRenderers)
+                    if (meshRef?.meshRenderer != null)
+                        flameRenderers.Add(meshRef.meshRenderer);
+
+            meshRenderers = GetComponentsInChildren<MeshRenderer>(true).Where(r => !flameRenderers.Contains(r)).ToArray();
+        }
         void Reset() => GetRenderers();
         
         // Changes depth layer and re-generates mesh

@@ -1,6 +1,7 @@
 using System;
 using SFS.Variables;
 using SFS.World;
+using SFS.WorldBase;
 using Sirenix.OdinInspector;
 using UnityEngine;
 
@@ -25,6 +26,13 @@ namespace SFS.Parts.Modules
         public FlameGlowModule[] flameGlows = new FlameGlowModule[0];
         public NozzleGlow[] nozzleGlows = new NozzleGlow[0];
 
+        [Button(ButtonSizes.Large)]
+        void GetModules()
+        {
+            flameMeshes = GetComponentsInChildren<FlameMeshModule>(true);
+            flameGlows = GetComponentsInChildren<FlameGlowModule>(true);
+        }
+
         // Throttle smoothing for mesh
         const float ThrottleSmoothTime = 0.1f;
 
@@ -48,11 +56,12 @@ namespace SFS.Parts.Modules
             if (GameManager.main == null)
                 return;
                 
-            vacuum = GetVacuum();
+            float atmospherePressure = GetAtmospherePressure();
+            vacuum = 1 - atmospherePressure; // physics-based: 0 at the surface (1 bar), 1 in vacuum
             throttle = Mathf.MoveTowards(throttle, engineThrottle.Value, Time.deltaTime / ThrottleSmoothTime);
 
             foreach (FlameMeshModule m in flameMeshes)
-                m.Apply(throttle, vacuum);
+                m.Apply(throttle, vacuum, atmospherePressure);
             foreach (FlameGlowModule g in flameGlows)
                 g.Apply(throttle, vacuum);
 
@@ -63,10 +72,23 @@ namespace SFS.Parts.Modules
                 n.Apply(nozzleGlow.Value);
         }
 
-        float GetVacuum()
+        // Real ambient pressure at the craft, from the planet's own atmosphere model, normalised so
+        // the surface = 1 (1 bar) and the top of the atmosphere = 0. Returns 0 (vacuum) with no atmosphere.
+        float GetAtmospherePressure()
         {
+            if (WorldView.main == null)
+                return 0;
+
             Location location = WorldView.main.ViewLocation;
-            return Mathf.InverseLerp(0.05f, 0.8f, (float)(location.Height / location.planet.AtmosphereHeightPhysics));
+            Planet planet = location.planet;
+            if (planet == null || !planet.HasAtmospherePhysics)
+                return 0;
+
+            double surface = planet.GetAtmosphericDensity(0);
+            if (surface <= 0)
+                return 0;
+
+            return Mathf.Clamp01((float)(planet.GetAtmosphericDensity(location.Height) / surface));
         }
         
         public void Clear()
@@ -74,13 +96,32 @@ namespace SFS.Parts.Modules
             throttle = 0;
 
             foreach (FlameMeshModule m in flameMeshes)
-                m.Apply(0, vacuum);
+                m.Apply(0, vacuum, 0.5f);
             foreach (FlameGlowModule g in flameGlows)
                 g.Apply(0, vacuum);
 
             nozzleGlow.Value = 0;
             foreach (NozzleGlow n in nozzleGlows)
                 n.Apply(0);
+        }
+
+        // Drives the editor debug-preview throttle (used by PartVisualizer's flame buttons)
+        public void SetDebugThrottle(float throttle)
+        {
+            #if UNITY_EDITOR
+            debugThrottle = throttle;
+            SetDebug();
+            #endif
+        }
+
+        // Drives the editor debug-preview throttle + vacuum (used by PartVisualizer's flame sliders)
+        public void SetDebugState(float throttle, float vacuum)
+        {
+            #if UNITY_EDITOR
+            debugThrottle = throttle;
+            debugVacuum = vacuum;
+            SetDebug();
+            #endif
         }
 
 
@@ -100,10 +141,15 @@ namespace SFS.Parts.Modules
             {
                 m.debugThrottle = debugThrottle;
                 m.debugVacuum = debugVacuum;
-                m.Apply(debugThrottle, debugVacuum);
+                m.ApplyDebug(debugThrottle, debugVacuum);
             }
             foreach (FlameGlowModule g in flameGlows)
+            {
+                Debug.Log(name);
+                g.debugThrottle = debugThrottle;
+                g.debugVacuum = debugVacuum;
                 g.Apply(debugThrottle, debugVacuum);
+            }
 
             nozzleGlow.Value = debugNozzleGlow;
             foreach (NozzleGlow n in nozzleGlows)

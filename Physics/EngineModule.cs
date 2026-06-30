@@ -29,7 +29,7 @@ namespace SFS.Parts.Modules
         [BoxGroup("State", false)] public Float_Reference throttle_Out;
         //
         [BoxGroup("Vacuum", false)] public bool isVacuum;
-        public const double maxDensity = 0.000015;
+        public const double vacuumMaxPressure = 0.25; // bar (surface = 1); vacuum engines can't ignite where ambient pressure is above this
         // Heat
         [Space, Space]
         public Bool_Reference heatOn;
@@ -265,7 +265,7 @@ namespace SFS.Parts.Modules
             if (isVacuum && !Location.planet.CanUseVacuumEngines(Location.Height))
             {
                 string height = Location.planet.VacuumStartHeight.ToDistanceString(false);
-                logger.Log(Loc.main.Cannot_Ignite_Vacuum_Engines_Below.Inject("height", height));
+                logger.Log(Loc.main.Cannot_Ignite_Vacuum_Engines_Below.Inject(height, "height"));
                 return;
             }
             

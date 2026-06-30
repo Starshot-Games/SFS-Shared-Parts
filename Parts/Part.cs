@@ -19,10 +19,10 @@ namespace SFS.Parts
     public class Part : HeatModuleBase, Rocket.INJ_Rocket
     {
         // Refs
-        [BoxGroup("Description", false)] public TranslationVariable displayName = new TranslationVariable();
-        [BoxGroup("Description", false)] public TranslationVariable pickCategoryName = new TranslationVariable();
-        [BoxGroup("Description", false)] public TranslationVariable description = new TranslationVariable();
-
+        [LabelText("Display Name")] public TranslationVariable displayName = new TranslationVariable();
+        [LabelText("Pick Section (Optional)")] public TranslationVariable pickCategoryName = new TranslationVariable();
+        [LabelText("Description")] public TranslationVariable description = new TranslationVariable();
+        
         [BoxGroup("Vars", false)] public Composed_Float mass;
         [BoxGroup("Vars", false)] public Composed_Vector2 centerOfMass;
         [BoxGroup("Vars", false)] public Float_Local density = new Float_Local(0.5f);
