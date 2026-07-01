@@ -20,7 +20,6 @@ namespace SFS.Parts
     {
         // Refs
         [LabelText("Display Name")] public TranslationVariable displayName = new TranslationVariable();
-        [LabelText("Pick Section (Optional)")] public TranslationVariable pickCategoryName = new TranslationVariable();
         [LabelText("Description")] public TranslationVariable description = new TranslationVariable();
         
         [BoxGroup("Vars", false)] public Composed_Float mass;
@@ -30,6 +29,8 @@ namespace SFS.Parts
         [BoxGroup("Refs", false), Required] public OrientationModule orientation;
         [BoxGroup("Refs", false), Required] public VariablesModule variablesModule;
 
+        [Space]
+        [LabelText("Pick Section (Optional)")] public TranslationVariable pickCategoryName = new TranslationVariable();
         public Variants[] variants = Array.Empty<Variants>();
         public UsePartUnityEvent onPartUsed;
         
