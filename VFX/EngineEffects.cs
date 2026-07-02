@@ -145,7 +145,6 @@ namespace SFS.Parts.Modules
             }
             foreach (FlameGlowModule g in flameGlows)
             {
-                Debug.Log(name);
                 g.debugThrottle = debugThrottle;
                 g.debugVacuum = debugVacuum;
                 g.Apply(debugThrottle, debugVacuum);

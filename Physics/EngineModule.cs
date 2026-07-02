@@ -66,6 +66,7 @@ namespace SFS.Parts.Modules
         {
             drawer.DrawStat(50, thrust.Value.ToThrustString());
             drawer.DrawStat(40, (ISP.Value * (float)Base.worldBase.settings.difficulty.IspMultiplier).ToEfficiencyString());
+            drawer.DrawStat(35, Loc.main.Engine_Type.Inject(isVacuum ? Loc.main.Vacuum_Engine : Loc.main.Ground_Engine, "type"));
             
             if (settings.build || settings.game)
             {
