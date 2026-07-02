@@ -177,22 +177,36 @@ namespace SFS.Parts.Modules
                     continue;
 
                 MeshRenderer meshRenderer = mesh.mesh;
-                const int Index = 0; // Wont work with submeshes, ok with it for now
 
-                MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
-                if (meshRenderer.HasPropertyBlock())
-                    meshRenderer.GetPropertyBlock(propertyBlock, Index);
+                // This per-material block replaces ModelSetup2D's renderer-wide block on the material,
+                // so it must carry the depth values too or they'd get wiped.
+                if (!mesh.searchedDepthSource)
+                {
+                    mesh.depthSource = meshRenderer.GetComponentInParentTree<ModelSetup2D>();
+                    mesh.searchedDepthSource = true;
+                }
 
-                propertyBlock.SetFloat(GlowIntensity, intensity * mesh.intensityMultiplier);
-                meshRenderer.SetPropertyBlock(propertyBlock, Index);
+                if (mesh.depthSource != null)
+                {
+                    MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+                    
+                    propertyBlock.SetFloat(GlowIntensity, intensity * mesh.intensityMultiplier);
+                    mesh.depthSource.ApplyDepth(propertyBlock);
+                    
+                    meshRenderer.SetPropertyBlock(propertyBlock, 0);   
+                }
             }
         }
-        
+
         [Serializable]
         public class GlowMesh
         {
             public MeshRenderer mesh;
             public float intensityMultiplier = 1;
+
+            // Cached so Apply (runs every frame) doesn't search the hierarchy each time
+            [NonSerialized] public ModelSetup2D depthSource;
+            [NonSerialized] public bool searchedDepthSource;
         }
     }
 }

@@ -46,17 +46,20 @@ namespace SFS.Parts.Modules
                     Debug.LogWarning("MeshRenderer is null");
                     continue;
                 }
-                
+
                 MaterialPropertyBlock propertyBlock = new();
-                
-                // Depth
-                float depthStart = GetGlobalDepth(0.5f, sortingLayer);
-                float depthM = (GetGlobalDepth(1, sortingLayer) - GetGlobalDepth(0, sortingLayer)) * 0.05f;
-                propertyBlock.SetFloat(DepthStart, depthStart);
-                propertyBlock.SetFloat(DepthM, depthM);
-                
+                ApplyDepth(propertyBlock);
                 r.SetPropertyBlock(propertyBlock);
             }
+        }
+
+        // Writes the depth values into an externally-owned property block. Modules that set their own
+        // blocks on these renderers (e.g. NozzleGlow) must include depth too - their block replaces
+        // this one on the material, so leaving depth out would wipe it.
+        public void ApplyDepth(MaterialPropertyBlock propertyBlock)
+        {
+            propertyBlock.SetFloat(DepthStart, GetGlobalDepth(0.5f, sortingLayer));
+            propertyBlock.SetFloat(DepthM, (GetGlobalDepth(1, sortingLayer) - GetGlobalDepth(0, sortingLayer)) * 0.05f);
         }
         
         public static float GetGlobalDepth(float depth, string sortingLayer)

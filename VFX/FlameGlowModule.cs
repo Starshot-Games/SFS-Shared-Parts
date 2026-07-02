@@ -50,34 +50,43 @@ namespace SFS.Parts.Modules
             if (glows == null)
                 return;
 
+            // Fully disable the glow objects when the engine is off, rather than only fading their alpha.
+            bool on = throttle > 0;
+            foreach (SpriteRenderer glow in glows)
+                if (glow != null && glow.gameObject.activeSelf != on)
+                    glow.gameObject.SetActive(on);
+
             if (vac)
                 vacuum = 1;
 
-            int maxValid = Mathf.Min(glows.Length, vac ? 1000 : groundData.color.Length, vacuumData.color.Length);
-            for (int i = 0; i < maxValid; i++)
+            if (on)
             {
-                SpriteRenderer a = glows[i];
+                int maxValid = Mathf.Min(glows.Length, vac ? 1000 : groundData.color.Length, vacuumData.color.Length);
+                for (int i = 0; i < maxValid; i++)
+                {
+                    SpriteRenderer a = glows[i];
 
-                if (a == null)
-                    continue;
+                    if (a == null)
+                        continue;
 
-                // Color
-                Color color = Color.Lerp(groundData.color[i], vacuumData.color[i], vacuum);
+                    // Color
+                    Color color = Color.Lerp(groundData.color[i], vacuumData.color[i], vacuum);
 
-                color.a *= throttle;
-                a.color = color;
+                    color.a *= throttle;
+                    a.color = color;
 
-                // Position
-                a.transform.localPosition = Vector2.Lerp(groundData.position[i], vacuumData.position[i], vacuum);
+                    // Position
+                    a.transform.localPosition = Vector2.Lerp(groundData.position[i], vacuumData.position[i], vacuum);
 
-                // Scale (hand it to FlameRandomizer if present, else set localScale directly)
-                Vector2 scale = Vector2.Lerp(groundData.scale[i], vacuumData.scale[i], vacuum);
-                //
-                FlameRandomizer randomizer = a.GetComponent<FlameRandomizer>();
-                if (randomizer != null)
-                    randomizer.size = scale;
-                else
-                    a.transform.localScale = scale;
+                    // Scale (hand it to FlameRandomizer if present, else set localScale directly)
+                    Vector2 scale = Vector2.Lerp(groundData.scale[i], vacuumData.scale[i], vacuum);
+                    //
+                    FlameRandomizer randomizer = a.GetComponent<FlameRandomizer>();
+                    if (randomizer != null)
+                        randomizer.size = scale;
+                    else
+                        a.transform.localScale = scale;
+                }
             }
 
             lastApplied_Throttle = throttle;
