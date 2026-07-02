@@ -4,7 +4,6 @@ using System.Linq;
 using UnityEngine;
 using SFS.Parts.Modules;
 using SFS.Platform;
-using Sirenix.Utilities;
 
 
 namespace SFS.Parts
@@ -201,8 +200,7 @@ namespace SFS.Parts
             // Includes 3d mesh bounds
             foreach (MeshRenderer renderer in part.GetComponentsInChildren<MeshRenderer>())
             {
-                bounds.ExpandTo(renderer.bounds.min);
-                bounds.ExpandTo(renderer.bounds.max);
+                ExpandToFitPoint(ref bounds, renderer.bounds.min, renderer.bounds.max);
                 success = true;
             }
             
@@ -237,6 +235,17 @@ namespace SFS.Parts
                 polygons.AddRange(GetModules<FramingColliderBounds>(parts).Select(x => x.shape));
             
             return GetBounds_WorldSpace(out bounds, polygons);
+        }
+
+        public static void ExpandToFitPoint(ref Rect rect, params Vector2[] points)
+        {
+            foreach (Vector2 point in points)
+            {
+                rect.xMin = Mathf.Min(rect.xMin, point.x);
+                rect.yMin = Mathf.Min(rect.yMin, point.y);
+                rect.xMax = Mathf.Max(rect.xMax, point.x);
+                rect.yMax = Mathf.Max(rect.yMax, point.y);
+            }
         }
 
         public static void ExpandToFitPoint(ref Vector2 min, ref Vector2 max, params Vector2[] points)

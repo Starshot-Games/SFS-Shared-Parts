@@ -32,9 +32,9 @@ namespace SFS.Parts.Modules
         void OnValidate()
         {
             flameExitTemperature = Mathf.Pow(exitPressure, (Gamma - 1f) / Gamma); // isentropic T/Tc = (P/Pc)^((g-1)/g)
-            atmospherePressureBar = DebugAtmospherePressure(debugVacuum);
 
             #if UNITY_EDITOR
+            atmospherePressureBar = DebugAtmospherePressure(debugVacuum);
             if (!Application.isPlaying && meshRenderers != null)
                 ApplyDebug(debugThrottle, debugVacuum);
             #endif
