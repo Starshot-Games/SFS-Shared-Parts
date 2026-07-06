@@ -370,7 +370,7 @@ namespace SFS.Parts
                 //sb.AppendLine($"Mass: {mass.ToTonesString()}");
 
                 // if has cylinder mass calculator, use it, if not use mass
-                sb.AppendLine($"<b>{name}</b>");
+                sb.AppendLine($"<size=12><b>{Name}</b></size>"); // 120% of the 10pt info text
                 //sb.AppendLine($"Mass: {mass.Value}t");
 
                 EngineModule engine = GetComponent<EngineModule>();
@@ -392,20 +392,47 @@ namespace SFS.Parts
                     if  (booster.wetMass.Value != 0 && !float.IsNaN(booster.wetMass.Value))
                         sb.AppendLine($"Mass <b>{booster.wetMass.Value}t</b>, TWR <b>{booster.thrustVector.Value / booster.wetMass.Value}</b>");
                 }
-
+                
                 if (!engine && !booster)
                     return;
-                
+
+                sb.AppendLine("");
+                sb.AppendLine($"<size=7><b>{WrapText(description.Field, 32)}</b></size>"); // 70% of the 10pt title/info text
+
                 // draw text at position, using bottom center pivot
                 // if its engine top center pivot, if its fuel tank, bottom center pivot
                 GUIStyle style = new GUIStyle
                 {
                     alignment = engine != null || booster != null? TextAnchor.LowerCenter : TextAnchor.UpperCenter,
                     normal = { textColor = Color.white },
-                    fontSize = 10
+                    fontSize = 10,
+                    richText = true
                 };
                 Handles.Label(transform.position, sb.ToString(), style);
             }
+        }
+
+        // Handles.Label sizes itself to the text and never wraps, so break long lines manually
+        static string WrapText(string text, int maxLineLength)
+        {
+            StringBuilder result = new StringBuilder();
+            int lineLength = 0;
+            foreach (string word in text.Split(' '))
+            {
+                if (lineLength > 0 && lineLength + 1 + word.Length > maxLineLength)
+                {
+                    result.Append('\n');
+                    lineLength = 0;
+                }
+                else if (lineLength > 0)
+                {
+                    result.Append(' ');
+                    lineLength++;
+                }
+                result.Append(word);
+                lineLength += word.Length;
+            }
+            return result.ToString();
         }
         #endif
     }
