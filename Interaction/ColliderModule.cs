@@ -129,14 +129,14 @@ namespace SFS.Parts.Modules
                     if (engineModule.heatOn.Value || !Base.worldBase.AllowsCheats)
                         rocket.aero.heatManager.HeatPart(heatModule);
                     
-                    // if (rocket == engineModule.Rocket)
-                    //     return;
-                    // Vector2 thrustPoint = Transform_Utility.LocalToLocalPoint(engineModule, rocket, engineModule.thrustPosition.Value);
-                    // Vector2 thrustDirection = Transform_Utility.LocalToLocalDirection(engineModule, rocket, engineModule.thrustNormal.Value).normalized;
-                    // Vector2 force = thrustDirection * (float)(engineModule.throttle_Out.Value * engineModule.thrust.Value * Time.deltaTime * -0.6);
-                    // rocket.rb2d.AddForceAtPosition(force, thrustPoint, ForceMode2D.Impulse);
-                    //
-                    // Debug.DrawRay(thrustPoint, force, Color.red);
+                    // Parts will be pushed away by flames if they're in the heatbox
+                    if (rocket == engineModule.Rocket)
+                        return;
+                    Vector2 thrustPoint = Transform_Utility.LocalToLocalPoint(engineModule, rocket, engineModule.thrustPosition.Value);
+                    Vector2 thrustDirection = Transform_Utility.LocalToLocalDirection(engineModule, rocket, engineModule.thrustNormal.Value).normalized;
+                    Vector2 force = thrustDirection * (float)(engineModule.throttle_Out.Value * engineModule.thrust.Value * -0.5);
+                    rocket.rb2d.AddForceAtPosition(force, thrustPoint, ForceMode2D.Force);
+                    Debug.DrawRay(thrustPoint, force, Color.red);
                 }
         }
     }
