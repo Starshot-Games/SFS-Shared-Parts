@@ -107,7 +107,7 @@ namespace SFS.Parts.Modules
 
         void Awake()
         {
-            if (float.IsNaN(oldMass))
+            if (float.IsNaN(oldMass) || Base.worldBase == null)
                 return;
             
             double massMultiplier = Base.worldBase.insideWorld.Value? Base.worldBase.settings.difficulty.EngineMassMultiplier : 1;
