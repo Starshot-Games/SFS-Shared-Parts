@@ -125,16 +125,21 @@ namespace SFS.Parts.Modules
             if (other.gameObject.layer == flameHeatLayer)
                 if (other != ownEngineNozzle)
                 {
-                    EngineModule engineModule = other.GetComponentInParent<EngineModule>();
-                    if (engineModule.heatOn.Value || !Base.worldBase.AllowsCheats)
+                    if (other.GetComponentInParent<ThrustBase>() is not { } module)
+                    {
+                        Debug.LogError("No valid ThrustBase module linked to the flame - skipping heating/pushing!");
+                        return;
+                    }
+                    
+                    if (module.HeatOn || !Base.worldBase.AllowsCheats)
                         rocket.aero.heatManager.HeatPart(heatModule);
                     
                     // Parts will be pushed away by flames if they're in the heatbox
-                    if (rocket == engineModule.Rocket)
+                    if (rocket == module.Rocket)
                         return;
-                    Vector2 thrustPoint = Transform_Utility.LocalToLocalPoint(engineModule, rocket, engineModule.thrustPosition.Value);
-                    Vector2 thrustDirection = Transform_Utility.LocalToLocalDirection(engineModule, rocket, engineModule.thrustNormal.Value).normalized;
-                    Vector2 force = thrustDirection * (float)(engineModule.throttle_Out.Value * engineModule.thrust.Value * -0.5);
+                    Vector2 thrustPoint = Transform_Utility.LocalToLocalPoint(module, rocket, module.ThrustPosition);
+                    Vector2 thrustDirection = Transform_Utility.LocalToLocalDirection(module, rocket, module.ThrustNormal).normalized;
+                    Vector2 force = thrustDirection * (float)(module.ThrottleOut.Value * module.ThrustAmount * -0.5);
                     rocket.rb2d.AddForceAtPosition(force, thrustPoint, ForceMode2D.Force);
                     Debug.DrawRay(thrustPoint, force, Color.red);
                 }

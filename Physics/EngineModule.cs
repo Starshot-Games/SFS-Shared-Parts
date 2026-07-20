@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace SFS.Parts.Modules 
 {
-    public partial class EngineModule : MonoBehaviour, Rocket.INJ_IsPlayer, Rocket.INJ_Physics, Rocket.INJ_Throttle, Rocket.INJ_TurnAxisTorque, Rocket.INJ_Rocket, Rocket.INJ_Location
+    public partial class EngineModule : ThrustBase, Rocket.INJ_IsPlayer, Rocket.INJ_Physics, Rocket.INJ_Throttle, Rocket.INJ_TurnAxisTorque, Rocket.INJ_Location
     {
         [BoxGroup("Ref", false), SuffixLabel("t"), LabelText("Engine Mass (Scaled)")] public float oldMass = float.NaN;
         //
@@ -41,9 +41,19 @@ namespace SFS.Parts.Modules
         //
         [ShowIf(nameof(multipleNozzles))] public HeatHitbox[] heatHitboxes;
 
-        
+
+        // ThrustBase (engine values already match the base format 1:1)
+        public override float ThrustAmount => thrust.Value;
+        public override Vector2 ThrustNormal => thrustNormal.Value;
+        public override Vector2 ThrustPosition => thrustPosition.Value;
+        public override bool HeatOn => heatOn.Value;
+        public override GameObject HeatHolder => heatHolder;
+        public override GameObject HeatHitbox => heatHitbox;
+        public override Float_Reference ThrottleOut => throttle_Out;
+        public override Bool_Reference On => engineOn;
+
+
         // Data Injection
-        public Rocket Rocket { get; set; }
         public Location Location { get; set; }
         public bool IsPlayer { get; set; }
         public Rigidbody2D Rb2d { get; set; }

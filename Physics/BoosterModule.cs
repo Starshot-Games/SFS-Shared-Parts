@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace SFS.Parts.Modules
 {
-    public class BoosterModule : MonoBehaviour, Rocket.INJ_Rocket, I_InitializePartModule, ResourceDrawer.I_Resource, Rocket.INJ_Throttle
+    public class BoosterModule : ThrustBase, I_InitializePartModule, ResourceDrawer.I_Resource, Rocket.INJ_Throttle
     {
         public SurfaceData surfaceForCover;
         [Space] [Required] public ResourceType resourceType;
@@ -36,11 +36,22 @@ namespace SFS.Parts.Modules
 
 
         // Injected
-        public Rocket Rocket { get; set; }
         Float_Local throttle_Input = new Float_Local();
         public float Throttle { set => throttle_Input.Value = value; }
         // Ref
         Part part;
+
+        // ThrustBase
+        // Boosters store thrust as a single vector, so split it into the engine format: magnitude + direction.
+        public override float ThrustAmount => thrustVector.Value.magnitude;
+        public override Vector2 ThrustNormal => thrustVector.Value.normalized;
+        public override Vector2 ThrustPosition => thrustPosition.Value;
+        public override bool HeatOn => true; // Boosters lack a "heat on" variable, so heat is always considered on
+        public override GameObject HeatHolder => heatHolder;
+        public override GameObject HeatHitbox => heatHitbox;
+        public override Float_Reference ThrottleOut => throttle_Out;
+        public override Bool_Reference On => boosterOn;
+
 
         // Get
         double BurnTimeLeft => TotalBurnTime * fuelPercent.Value;
