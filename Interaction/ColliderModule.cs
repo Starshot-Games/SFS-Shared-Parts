@@ -126,8 +126,6 @@ namespace SFS.Parts.Modules
                 if (other != ownEngineNozzle)
                 {
                     EngineModule engineModule = other.GetComponentInParent<EngineModule>();
-                    if (engineModule == null) return;
-                    
                     if (engineModule.heatOn.Value || !Base.worldBase.AllowsCheats)
                         rocket.aero.heatManager.HeatPart(heatModule);
                     
