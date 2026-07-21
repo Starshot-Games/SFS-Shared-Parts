@@ -53,10 +53,8 @@ namespace SFS.Parts.Modules
             }
         }
 
-        // Writes the depth values into an externally-owned property block. Modules that set their own
-        // blocks on these renderers (e.g. NozzleGlow) must include depth too - their block replaces
-        // this one on the material, so leaving depth out would wipe it.
-        public void ApplyDepth(MaterialPropertyBlock propertyBlock)
+        // Writes the depth values ("Part 2d Model" shader convention) into the property block.
+        void ApplyDepth(MaterialPropertyBlock propertyBlock)
         {
             propertyBlock.SetFloat(DepthStart, GetGlobalDepth(0.5f, sortingLayer));
             propertyBlock.SetFloat(DepthM, (GetGlobalDepth(1, sortingLayer) - GetGlobalDepth(0, sortingLayer)) * 0.05f);
