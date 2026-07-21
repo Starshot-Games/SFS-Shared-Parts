@@ -39,14 +39,6 @@ namespace SFS.Parts.Modules
             float scaleY = Vector2.Angle(transform.TransformVector(Vector2.up), lightDirection) > 90? -1 : 1;
             panel.localScale = new Vector2(scaleX, scaleY);
         }
-        Vector2 GetLightDirection()
-        {
-            Vector2 a = new Vector2(-1, 1);
-            
-            if (GameManager.main != null && transform.root.childCount > 0 && transform.root.GetChild(0).name == "Parts Holder")
-                return transform.root.GetChild(0).TransformDirection(a);
-
-            return a;
-        }
+        Vector2 GetLightDirection() => ModelSetup2D.GetLightDirection(transform);
     }
 }

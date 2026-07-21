@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Sirenix.OdinInspector;
+using SFS.World;
 using UnityEngine;
 
 // only reference non-generated meshes, 
@@ -11,6 +12,7 @@ namespace SFS.Parts.Modules
     {
         static readonly int DepthStart = Shader.PropertyToID("_DepthStart");
         static readonly int DepthM = Shader.PropertyToID("_DepthM");
+        static readonly int LightDirection = Shader.PropertyToID("_LightDirection");
 
         public MeshRenderer[] meshRenderers;
         
@@ -39,6 +41,8 @@ namespace SFS.Parts.Modules
         
         public void SetMesh()
         {
+            Vector2 lightDirection = GetLightDirection(transform);
+
             foreach (MeshRenderer r in meshRenderers)
             {
                 if (r == null)
@@ -49,6 +53,7 @@ namespace SFS.Parts.Modules
 
                 MaterialPropertyBlock propertyBlock = new();
                 ApplyDepth(propertyBlock);
+                propertyBlock.SetVector(LightDirection, lightDirection); // Shader decides flip per-fragment from the UV axes vs this direction
                 r.SetPropertyBlock(propertyBlock);
             }
         }
@@ -60,6 +65,16 @@ namespace SFS.Parts.Modules
             propertyBlock.SetFloat(DepthM, (GetGlobalDepth(1, sortingLayer) - GetGlobalDepth(0, sortingLayer)) * 0.05f);
         }
         
+        public static Vector2 GetLightDirection(Transform t)
+        {
+            Vector2 a = new Vector2(-1, 1);
+
+            if (GameManager.main != null && t.root.childCount > 0 && t.root.GetChild(0).name == "Parts Holder")
+                return t.root.GetChild(0).TransformDirection(a);
+
+            return a;
+        }
+
         public static float GetGlobalDepth(float depth, string sortingLayer)
             => RenderSortingManager.main != null ? RenderSortingManager.main.GetGlobalDepth(depth, sortingLayer) : depth;
         
