@@ -87,7 +87,85 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(StripesStrength, stripesStrength);
 
                 a.meshRenderer.SetPropertyBlock(propertyBlock, 0);
+
+                // Frustum-culling fix: the vertex shader (Flame_Base.cginc / VertCore) displaces every
+                // vertex far outside the source mesh (width *= GetFlameWidth() - up to ~20x in the
+                // near-vacuum billow, height *= 12*exitPressure*3, then everything *= 2). Unity culls on
+                // the *source* mesh bounds, so without this it wrongly culls the flame as soon as the tiny
+                // base mesh leaves the frustum. Override localBounds with the displaced envelope so culling
+                // matches what is actually drawn.
+                a.meshRenderer.localBounds = ComputeFlameBounds(a, throttle, atmospherePressure);
             }
+        }
+
+        // Local-space AABB of the shader-displaced flame. Mirrors VertCore + GetFlameWidth so culling
+        // tracks the real drawn envelope; kept intentionally conservative (small safety margin) since an
+        // over-large bound only costs the odd extra draw, while an under-sized one reintroduces the bug.
+        Bounds ComputeFlameBounds(MeshRef a, float throttle, float atmospherePressure)
+        {
+            if (a.meshFilter == null)
+                a.meshFilter = a.meshRenderer.GetComponent<MeshFilter>();
+
+            Mesh mesh = a.meshFilter != null ? a.meshFilter.sharedMesh : null;
+            if (mesh == null)
+                return a.meshRenderer.localBounds; // nothing to base it on; leave as-is
+
+            Bounds b = mesh.bounds;
+
+            // Width envelope is monotonic in meshY (= -vertex.y), so it peaks at the most-displaced tip.
+            float maxMeshY = Mathf.Max(Mathf.Abs(b.min.y), Mathf.Abs(b.max.y));
+            float width = GetFlameWidth(maxMeshY, throttle, atmospherePressure) * 1.1f; // +10% margin
+
+            // xz get scaled by width then *2 (VertCore: a.vertex.xz *= width; a.vertex *= 2).
+            float halfX = Mathf.Max(Mathf.Abs(b.min.x), Mathf.Abs(b.max.x)) * 2f * width;
+            float halfZ = Mathf.Max(Mathf.Abs(b.min.z), Mathf.Abs(b.max.z)) * 2f * width;
+
+            // y gets scaled by 12*exitPressure*3 then *2.
+            float yScale = 12f * exitPressure * 3f * 2f;
+            float y0 = b.min.y * yScale;
+            float y1 = b.max.y * yScale;
+
+            Bounds local = new Bounds();
+            local.SetMinMax(
+                new Vector3(-halfX, Mathf.Min(y0, y1), -halfZ),
+                new Vector3(halfX, Mathf.Max(y0, y1), halfZ));
+            return local;
+        }
+
+        // CPU port of the shader's GetDiamondsStrength (Flame_Base.cginc): overexpansion-driven,
+        // zero once the jet reaches perfect expansion.
+        static float GetDiamondsStrength(float flamePressure, float ambientPressure)
+            => Mathf.Clamp01(Mathf.Max(ambientPressure - flamePressure, 0f) * 2f);
+
+        // CPU port of the shader's GetFlameWidth (Flame_Base.cginc). Keep in sync with the shader.
+        float GetFlameWidth(float y, float throttle, float atmospherePressure)
+        {
+            const float gamma = 1.2f;
+            const int diamondCount = 5;
+            const float diamondOffset = 0f; // material default; C# never overrides it
+
+            float flamePressure = exitPressure * Mathf.Lerp(0.1f, 1f, throttle);
+            float ambientPressure = Mathf.Max(atmospherePressure, 1e-3f);
+
+            float width = 0f;
+
+            // Mach diamonds
+            float diamonds = Mathf.Abs(Mathf.Sin((y * diamondCount - diamondOffset) * Mathf.PI))
+                             - Mathf.Abs(Mathf.Sin(-diamondOffset * Mathf.PI));
+            width += diamonds * GetDiamondsStrength(flamePressure, ambientPressure) * 0.3f;
+
+            // Standard expansion
+            width += y * 0.5f;
+
+            // Vac / underexpanded billow
+            float pressureRatio = flamePressure / ambientPressure;
+            float expandWidth = Mathf.Pow(Mathf.Max(pressureRatio, 1f), 1f / (2f * gamma)) - 1f;
+            width += expandWidth * (Mathf.Sqrt(y + 0.05f) - Mathf.Sqrt(0.05f)) * 1.3f;
+
+            // Scale (based on pressure)
+            width *= exitPressure * 3f;
+
+            return 1f + width;
         }
 
         // Real atmospheres thin out exponentially with altitude (barometric law: P ~ exp(-h/H)).
@@ -113,6 +191,8 @@ namespace SFS.Parts.Modules
         {
             public MeshRenderer meshRenderer;
             public bool machDiamondsMesh;
+
+            [NonSerialized] public MeshFilter meshFilter; // cached lazily for the culling-bounds override
         }
     }
 }
