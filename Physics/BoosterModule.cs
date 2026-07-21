@@ -223,6 +223,13 @@ namespace SFS.Parts.Modules
                 Ignite();
         }
 
+        // This was removed, for which I can't find a logical explanation
+        public void Fire_Instantly()
+        {
+            if (CanUseBooster(this, Rocket.isPlayer.Value))
+                Ignite();
+        }
+        
         void Ignite()
         {
             boosterPrimed.Value = false;
