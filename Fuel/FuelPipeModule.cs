@@ -99,6 +99,8 @@ namespace SFS.Parts.Modules
         // Flowing
         public static void FixedUpdate_FuelPipeFlow(List<(ResourceModule[] froms, ResourceModule to)> flows)
         {
+            if (flows.Count == 0) return;
+            
             (ResourceModule[] from, ResourceModule to)[] validFlows = flows.Where(f => f.froms.Any(a => a.ResourceAmount > 0) && f.to.ResourceSpace > 0).ToArray();
 
             // How many are taking from tank / How many are adding into tank

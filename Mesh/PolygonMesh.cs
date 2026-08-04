@@ -98,13 +98,13 @@ namespace SFS.Parts.Modules
         {
             return new [] { texture.colorTex.Get_Rect(transform), texture.shapeTex.Get_Rect(transform), texture.shadowTex.Get_Rect(transform) };
         }
-        Color[] GetColors(int verticeCount)
+        List<Color> GetColors(int verticeCount)
         {
             Color color = type == ColorType.Module && colorModule != null? colorModule.GetColor() : colorBasic;
-            
-            Color[] output = new Color[verticeCount];
-            for (int i = 0; i < output.Length; i++)
-                output[i] = color;
+
+            List<Color> output = new List<Color>(verticeCount);
+            for (int i = 0; i < verticeCount; i++)
+                output.Add(color);
 
             return output;
         }

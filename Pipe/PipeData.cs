@@ -20,30 +20,84 @@ namespace SFS.Parts.Modules
 
         // Data
         public Pipe pipe;
+        bool lastReduceResolution;
         protected void SetData(Pipe pipe)
         {
-            this.pipe = pipe;
             List<PipePoint> points = pipe.points;
-            
-            Vector2[] vertices = new Vector2[points.Count * 2];
+
+            // Sets cut
             for (int i = 0; i < points.Count; i++)
             {
-                // Sets cut
                 PipePoint point = points[i];
                 point.cutLeft = advancedCut ? advancedCutData.cuts[advancedCutData.cuts.Length == 1? 0 : i].left : Mathf.Clamp(cut - 1, -1, 1) / 2 + 0.5f;
                 point.cutRight = advancedCut ? advancedCutData.cuts[advancedCutData.cuts.Length == 1? 0 : i].right : Mathf.Clamp(cut + 1, -1, 1) / 2 + 0.5f;
+            }
+            
+            bool unchanged = reduceResolution == lastReduceResolution && ShapeMatches(points);
+            this.pipe = pipe;
+            lastReduceResolution = reduceResolution;
 
-                // Output point
+            if (unchanged)
+                return;
+
+            StoreShape(points);
+
+            // Output points
+            Vector2[] vertices = new Vector2[points.Count * 2];
+            for (int i = 0; i < points.Count; i++)
+            {
+                PipePoint point = points[i];
                 vertices[i] = point.GetPosition(point.cutLeft * 2 - 1);
                 vertices[vertices.Length - 1 - i] = point.GetPosition(point.cutRight * 2 - 1);
             }
-            
+
             if (reduceResolution && vertices.Length > 4)
                 SetData(new Polygon(this, vertices), new Polygon(this, ToFastPoints(vertices, 0.05f)));
             else
                 SetData(new Polygon(this, vertices));
         }
-        
+
+        const int ShapeStride = 7;
+        float[] lastShape;
+        bool ShapeMatches(List<PipePoint> points)
+        {
+            if (lastShape == null || lastShape.Length != points.Count * ShapeStride)
+                return false;
+
+            for (int i = 0; i < points.Count; i++)
+            {
+                PipePoint point = points[i];
+                int o = i * ShapeStride;
+
+                if (lastShape[o] != point.position.x || lastShape[o + 1] != point.position.y
+                    || lastShape[o + 2] != point.width.x || lastShape[o + 3] != point.width.y
+                    || lastShape[o + 4] != point.height
+                    || lastShape[o + 5] != point.cutLeft || lastShape[o + 6] != point.cutRight)
+                    return false;
+            }
+
+            return true;
+        }
+        void StoreShape(List<PipePoint> points)
+        {
+            if (lastShape == null || lastShape.Length != points.Count * ShapeStride)
+                lastShape = new float[points.Count * ShapeStride];
+
+            for (int i = 0; i < points.Count; i++)
+            {
+                PipePoint point = points[i];
+                int o = i * ShapeStride;
+
+                lastShape[o] = point.position.x;
+                lastShape[o + 1] = point.position.y;
+                lastShape[o + 2] = point.width.x;
+                lastShape[o + 3] = point.width.y;
+                lastShape[o + 4] = point.height;
+                lastShape[o + 5] = point.cutLeft;
+                lastShape[o + 6] = point.cutRight;
+            }
+        }
+
         // Resolution reduction
         static Vector2[] ToFastPoints(Vector2[] points, float tolerance)
         {

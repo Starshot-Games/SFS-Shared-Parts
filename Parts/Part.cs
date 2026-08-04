@@ -171,7 +171,11 @@ namespace SFS.Parts
             string typeName = typeof(T).Name;
 
             if (!modules.ContainsKey(typeName))
-                modules.Add(typeName, GetComponentsInChildren<T>(true));
+            {
+                var cached = GetComponentsInChildren<T>(true);
+                modules.Add(typeName, cached);
+                return cached;
+            }
 
             return (T[])modules[typeName];
         }
@@ -180,7 +184,11 @@ namespace SFS.Parts
             string typeName = typeof(T).Name;
 
             if (!moduleCount.ContainsKey(typeName))
-                moduleCount.Add(typeName, GetComponentsInChildren<T>(true).Length);
+            {
+                var modulesNew = GetComponentsInChildren<T>(true);
+                moduleCount.Add(typeName, modulesNew.Length);
+                modules.TryAdd(typeName, modulesNew); // also update the modules cache while we're at it
+            }
 
             return moduleCount[typeName];
         }
@@ -199,7 +207,15 @@ namespace SFS.Parts
             return displayName.Field;
         }
 
-        public List<PolygonData> GetClickPolygons() => GetModules<PolygonData>().Where(x => x.Click).ToList();
+        public List<PolygonData> GetClickPolygons()
+        {
+            List<PolygonData> result = new();
+            foreach (PolygonData module in GetModules<PolygonData>())
+            {
+                if (module.Click) result.Add(module);
+            }
+            return result;
+        }
 
         public (ConvexPolygon[], bool isFront) GetBuildColliderPolygons(bool forAttach = false)
         {

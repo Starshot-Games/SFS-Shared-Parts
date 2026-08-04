@@ -1,6 +1,8 @@
 using Sirenix.OdinInspector;
 using System.Collections.Generic;
-using System.Linq;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -17,13 +19,23 @@ namespace SFS.Parts.Modules
         static int baseDepthID = Shader.PropertyToID("_BaseDepth");
         static int depthMultiplierID = Shader.PropertyToID("_DepthMultiplier");
 
+        // Caches
+        MeshRenderer meshRendererCache;
+        MeshFilter meshFilterCache;
+        Material[] appliedMaterials;
+        Material appliedMaterial;
+        MaterialPropertyBlock propertyBlock;
+
+        MeshRenderer GetRenderer() => meshRendererCache != null? meshRendererCache : meshRendererCache = this.GetOrAddComponent<MeshRenderer>();
+        MeshFilter GetFilter() => meshFilterCache != null? meshFilterCache : meshFilterCache = this.GetOrAddComponent<MeshFilter>();
+
         // Creates a mesh based on the specified values
-        protected void ApplyMeshData(List<Vector3> vertices, int[] indices, List<Vector3>[] UVs, Color[] colors, List<Vector3> shading, List<Vector3> depths, float baseDepth, float depthMultiplier, List<PartTex> textures, MeshTopology topology)
+        protected void ApplyMeshData(List<Vector3> vertices, int[] indices, List<Vector3>[] UVs, List<Color> colors, List<Vector3> shading, List<Vector3> depths, float baseDepth, float depthMultiplier, List<PartTex> textures, MeshTopology topology)
         {
             // Refs
             Mesh mesh = GetMesh();
-            Renderer meshRenderer = this.GetOrAddComponent<MeshRenderer>();
-            
+            Renderer meshRenderer = GetRenderer();
+
             // Vertices
             mesh.SetVertices(vertices);
 
@@ -32,8 +44,8 @@ namespace SFS.Parts.Modules
                 mesh.SetUVs(channel_Index, UVs[channel_Index]);
 
             // Color
-            mesh.colors = colors;
-            
+            mesh.SetColors(colors);
+
             // Shading
             mesh.SetUVs(5, shading);
             
@@ -121,17 +133,31 @@ namespace SFS.Parts.Modules
                 }
                 #if UNITY_EDITOR
                 else
-                    material = (Material)UnityEditor.AssetDatabase.LoadAssetAtPath(engineGlow? "Assets/Materials/Engine Glow.mat" : "Assets/Materials/Part 1.mat", typeof(Material));     
+                    material = (Material)UnityEditor.AssetDatabase.LoadAssetAtPath(engineGlow? "Assets/Materials/Engine Glow.mat" : "Assets/Materials/Part 1.mat", typeof(Material));
                 #endif
 
-                meshRenderer.sharedMaterials = new Material[count].Select(a => material).ToArray();
+                // Assigning sharedMaterials rebuilds the renderer's material state, so it's only done when it would actually change
+                if (appliedMaterials != null && appliedMaterials.Length == count && appliedMaterial == material)
+                    return;
+
+                appliedMaterials = new Material[count];
+                appliedMaterial = material;
+
+                for (int i = 0; i < count; i++)
+                    appliedMaterials[i] = material;
+
+                meshRenderer.sharedMaterials = appliedMaterials;
             }
             void SetPropertyBlock(PartTex T, int index)
             {
-                MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
+                if (propertyBlock == null)
+                    propertyBlock = new MaterialPropertyBlock();
+
+                propertyBlock.Clear();
+
                 if (meshRenderer.HasPropertyBlock())
                     meshRenderer.GetPropertyBlock(propertyBlock, index);
-                
+
                 // Tex
                 propertyBlock.SetTexture(PartTex.ColorTexture, T.color);
                 propertyBlock.SetTexture(PartTex.ShapeTexture, T.shape);
@@ -152,7 +178,7 @@ namespace SFS.Parts.Modules
         // Gets mesh component or adds it if it doesn't exist
         Mesh GetMesh()
         {
-            MeshFilter meshFilter = this.GetOrAddComponent<MeshFilter>();
+            MeshFilter meshFilter = GetFilter();
 
             if (meshFilter.sharedMesh == null || !Application.isPlaying)
                 meshFilter.sharedMesh = meshReference = new Mesh { name = "BaseMesh" };

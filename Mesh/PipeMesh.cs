@@ -36,10 +36,18 @@ namespace SFS.Parts.Modules
 
         // Mesh generation
         bool initialized;
+
+        // Reused scratch buffers, reset at the start of each GenerateMesh, to avoid per-rebuild alloc
+        readonly UV_Splittable[] uv_Channels = new UV_Splittable[3];
+        readonly List<StartEnd_UV>[] uv_Elements = new List<StartEnd_UV>[3];
+        readonly Splittable[] splittables = new Splittable[5];
+        readonly List<Line> slopeShading = new List<Line>();
+        readonly MeshData data = new MeshData();
+
         public override void GenerateMesh()
         {
             bool testScene = GameManager.main == null && BuildManager.main == null && HubManager.main == null;
-            
+
             if (!initialized && Application.isPlaying && !testScene) // Prevents repeated generations on startup
                 return;
 
@@ -49,23 +57,32 @@ namespace SFS.Parts.Modules
             // Mesh
             Points_Splittable points = new Points_Splittable(pipeData.pipe.points);
             //
-            UV_Splittable[] uv_Channels = Get_UV_Channels(pipeData.pipe).Select(x => new UV_Splittable(x)).ToArray();
+            List<StartEnd_UV>[] uv_Output = Get_UV_Channels(pipeData.pipe);
+            for (int i = 0; i < uv_Channels.Length; i++)
+                uv_Channels[i] = new UV_Splittable(uv_Output[i]);
             Color_Splittable color_Channel = new Color_Splittable(colors.GetOutput());
 
             // Splitting
-            List<Splittable> a = new List<Splittable>();
-            a.Add(points);
-            a.AddRange(uv_Channels);
-            a.Add(color_Channel);
-            Splittable.Split(points.GetSegment(), a.ToArray());
-            
+            splittables[0] = points;
+            splittables[1] = uv_Channels[0];
+            splittables[2] = uv_Channels[1];
+            splittables[3] = uv_Channels[2];
+            splittables[4] = color_Channel;
+            Splittable.Split(points.GetSegment(), splittables);
+
+            // Split replaces each channel's list, so the element lists are only read back out afterwards
+            for (int i = 0; i < uv_Channels.Length; i++)
+                uv_Elements[i] = uv_Channels[i].element;
+
             // Generates quads
-            MeshData data = new MeshData();
-            GetMeshQuads(points.elements, uv_Channels.Select(x => x.element).ToArray(), color_Channel.element, GetSlopeShading(points.elements), data);
+            data.Clear();
+            GetSlopeShading(points.elements, slopeShading);
+            GetMeshQuads(points.elements, uv_Elements, color_Channel.element, slopeShading, data);
 
             // Generates mesh
-            ApplyMeshData(data.vertices, GetQuadIndices(points.elements), data.UVs, data.colors.ToArray(), data.shading, data.depths, pipeData.BaseDepth, pipeData.depthMultiplier, data.textures, MeshTopology.Quads);
+            ApplyMeshData(data.vertices, GetQuadIndices(points.elements), data.UVs, data.colors, data.shading, data.depths, pipeData.BaseDepth, pipeData.depthMultiplier, data.textures, MeshTopology.Quads);
         }
+        static readonly float[] NoM = { 1, 1, 1, 1 }; // Used instead of M by fixed width textures
         void GetMeshQuads(List<PipePoint> points, List<StartEnd_UV>[] vertical_UVs, Color_Channel color_Channel, List<Line> slopeShading, MeshData data)
         {
             // Loops trough each point 
@@ -77,19 +94,15 @@ namespace SFS.Parts.Modules
                 float width_B = point_B.width.magnitude;
                 
                 // Vertices
-                Vector3[] vertices =
-                {
-                    point_A.GetPosition(point_A.cutLeft * 2 - 1),
-                    point_B.GetPosition(point_B.cutLeft * 2 - 1),
-                    point_B.GetPosition(point_B.cutRight * 2 - 1),
-                    point_A.GetPosition(point_A.cutRight * 2 - 1)
-                };
-                
+                data.vertices.Add(point_A.GetPosition(point_A.cutLeft * 2 - 1));
+                data.vertices.Add(point_B.GetPosition(point_B.cutLeft * 2 - 1));
+                data.vertices.Add(point_B.GetPosition(point_B.cutRight * 2 - 1));
+                data.vertices.Add(point_A.GetPosition(point_A.cutRight * 2 - 1));
+
                 // M for uv  // Needs to calculate it without cutting
                 float[] M = UV_Utility.GetQuadM(point_A.GetPosition(-1), point_B.GetPosition(-1), point_B.GetPosition(1), point_A.GetPosition(1));
-                
+
                 // Calculates UVs for each channel
-                Vector3[][] UVs = new Vector3[vertical_UVs.Length][];
                 for (int uv_Index = 0; uv_Index < vertical_UVs.Length; uv_Index++)
                 {
                     // Calculates UV and applies M at the end
@@ -121,66 +134,54 @@ namespace SFS.Parts.Modules
                    
                     Line2 texture_UV = tex.texture_UV;
                     Line vertical = tex.vertical_UV;
-                    float[] m = tex.data.fixedWidth? new float[]{ 1, 1, 1, 1 } : M;
+                    float[] m = tex.data.fixedWidth? NoM : M;
 
-                    UVs[uv_Index] = new []
-                    {
-                        texture_UV.LerpUnclamped(leftBottom, vertical.start).ToVector3(1) * m[0],
-                        texture_UV.LerpUnclamped(leftTop, vertical.end).ToVector3(1) * m[1],
-                        texture_UV.LerpUnclamped(rightTop, vertical.end).ToVector3(1) * m[2],
-                        texture_UV.LerpUnclamped(rightBottom, vertical.start).ToVector3(1) * m[3]
-                    };
+                    List<Vector3> channel = data.UVs[uv_Index];
+                    channel.Add(texture_UV.LerpUnclamped(leftBottom, vertical.start).ToVector3(1) * m[0]);
+                    channel.Add(texture_UV.LerpUnclamped(leftTop, vertical.end).ToVector3(1) * m[1]);
+                    channel.Add(texture_UV.LerpUnclamped(rightTop, vertical.end).ToVector3(1) * m[2]);
+                    channel.Add(texture_UV.LerpUnclamped(rightBottom, vertical.start).ToVector3(1) * m[3]);
                 }
 
                 // Colors
                 StartEnd_Color quad = color_Channel.elements[quadIndex];
-                Color[] colors = { quad.color_Edge.start, quad.color_Edge.end, quad.color_Edge.end, quad.color_Edge.start };
+                data.colors.Add(quad.color_Edge.start);
+                data.colors.Add(quad.color_Edge.end);
+                data.colors.Add(quad.color_Edge.end);
+                data.colors.Add(quad.color_Edge.start);
 
                 // Shading
                 Line s = slopeShading[quadIndex];
-                Vector3[] shading = new[]
-                {
-                    new Vector3(s.start, 0, 1f) * M[0],
-                    new Vector3(s.end, 0, 1f) * M[1],
-                    new Vector3(s.end, 0, 1f) * M[2],
-                    new Vector3(s.start, 0, 1f) * M[3],
-                };
-                
-                // Depths
-                Vector3[] depths =
-                {
-                    // (uv position, point width, m offset)
-                    new Vector3(point_A.cutLeft, width_A, 1f) * M[0],
-                    new Vector3(point_B.cutLeft, width_B, 1f) * M[1],
-                    new Vector3(point_B.cutRight, width_B, 1f) * M[2],
-                    new Vector3(point_A.cutRight, width_A, 1f) * M[3],
-                };
-                
-                
-                // Adds mesh data
-                data.vertices.AddRange(vertices);
-                data.UVs[0].AddRange(UVs[0]);
-                data.UVs[1].AddRange(UVs[1]);
-                data.UVs[2].AddRange(UVs[2]);
-                data.colors.AddRange(colors);
-                data.shading.AddRange(shading);
-                data.depths.AddRange(depths);
+                data.shading.Add(new Vector3(s.start, 0, 1f) * M[0]);
+                data.shading.Add(new Vector3(s.end, 0, 1f) * M[1]);
+                data.shading.Add(new Vector3(s.end, 0, 1f) * M[2]);
+                data.shading.Add(new Vector3(s.start, 0, 1f) * M[3]);
+
+                // Depths // (uv position, point width, m offset)
+                data.depths.Add(new Vector3(point_A.cutLeft, width_A, 1f) * M[0]);
+                data.depths.Add(new Vector3(point_B.cutLeft, width_B, 1f) * M[1]);
+                data.depths.Add(new Vector3(point_B.cutRight, width_B, 1f) * M[2]);
+                data.depths.Add(new Vector3(point_A.cutRight, width_A, 1f) * M[3]);
+
                 data.textures.Add(new PartTex { color = vertical_UVs[0][quadIndex].texture, shape = vertical_UVs[1][quadIndex].texture, shadow = vertical_UVs[2][quadIndex].texture });
             }
         }
 
-        // Generates indices for quads
+        // Generates indices for quads // Always the identity sequence, so it's only rebuilt when the quad count changes
+        int[] quadIndices = new int[0];
         int[] GetQuadIndices(List<PipePoint> points)
         {
-            if (points.Count == 0)
-                return new int[0];
+            int length = points.Count == 0? 0 : (points.Count - 1) * 4;
 
-            int[] indices = new int[(points.Count - 1) * 4];
+            if (quadIndices.Length != length)
+            {
+                quadIndices = new int[length];
 
-            for (int i = 0; i < indices.Length; i++)
-                indices[i] = i;
+                for (int i = 0; i < length; i++)
+                    quadIndices[i] = i;
+            }
 
-            return indices;
+            return quadIndices;
         }
 
         // Used by skin module
@@ -216,21 +217,20 @@ namespace SFS.Parts.Modules
             return a;
         }
         
-        List<Line> GetSlopeShading(List<PipePoint> points)
+        readonly List<float> shade = new List<float>();
+        void GetSlopeShading(List<PipePoint> points, List<Line> lines)
         {
-            float[] shade = new float[points.Count - 1];
+            shade.Clear();
             for (int i = 0; i < points.Count - 1; i++)
-                shade[i] = GetSlopeShade(points[i], points[i + 1]);
-            
-            List<Line> lines = new List<Line>();
+                shade.Add(GetSlopeShade(points[i], points[i + 1]));
+
+            lines.Clear();
             for (int i = 0; i < points.Count - 1; i++)
             {
                 float start = shade[smoothShading && i > 0? i - 1 : i];
                 float end = shade[i];
                 lines.Add(new Line(start, end));
             }
-            
-            return lines;
         }
         float GetSlopeShade(PipePoint point_A, PipePoint point_B)
         {
@@ -542,5 +542,19 @@ namespace SFS.Parts.Modules
         public List<Vector3> shading = new List<Vector3>();
         public List<Vector3> depths = new List<Vector3>();
         public List<PartTex> textures = new List<PartTex>();
+
+        // Keeps the backing arrays so a re-generation of the same mesh doesn't allocate
+        public void Clear()
+        {
+            vertices.Clear();
+
+            foreach (List<Vector3> uv in UVs)
+                uv.Clear();
+
+            colors.Clear();
+            shading.Clear();
+            depths.Clear();
+            textures.Clear();
+        }
     }
 }

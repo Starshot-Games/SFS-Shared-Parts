@@ -37,7 +37,7 @@ namespace SFS.Parts.Modules
             else
             {
                 if (collider_Box != null)
-                    Destroy(collider_Polygon);
+                    Destroy(collider_Box);
                 
                 if (collider_Polygon == null)
                     collider_Polygon = gameObject.AddComponent<PolygonCollider2D>();

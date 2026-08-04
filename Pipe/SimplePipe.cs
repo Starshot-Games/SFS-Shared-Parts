@@ -17,16 +17,25 @@ namespace SFS.Parts.Modules
         [BoxGroup("edit", false), HorizontalGroup("edit/a")] public bool view = true;
 
         int I_InitializePartModule.Priority => 10;
+        bool subscribing;
         void I_InitializePartModule.Initialize()
         {
+            // Composed's += invokes the callback immediately, so subscribing all four would output four identical pipes
+            subscribing = true;
             width_a.OnChange += Output;
             width_b.OnChange += Output;
             height_a.OnChange += Output;
             height_b.OnChange += Output;
+            subscribing = false;
+
+            Output();
         }
 
         public override void Output()
         {
+            if (subscribing)
+                return;
+
             Pipe pipe = new Pipe();
 
             pipe.AddPoint(new Vector2(offsetX, height_a.Value), Vector2.right * width_a.Value);

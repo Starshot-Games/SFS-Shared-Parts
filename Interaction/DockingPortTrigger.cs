@@ -1,3 +1,4 @@
+using SFS.World;
 using Sirenix.OdinInspector;
 using UnityEngine;
 
@@ -14,6 +15,12 @@ namespace SFS.Parts.Modules
 
         void Start()
         {
+            if (GameManager.main == null)
+            {
+                enabled = false;
+                return;
+            }
+            
             rb2d = GetComponent<Rigidbody2D>();
             rb2d.isKinematic = true;
 
