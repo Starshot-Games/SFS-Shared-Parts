@@ -75,12 +75,16 @@ namespace SFS.Parts.Modules
                 return;
             }
 
-            Mode oldMode = modes[CurrentIndex];
+            newModeIndex = Mathf.Clamp(newModeIndex, 0, modes.Length - 1);
             Mode newMode = modes[newModeIndex];
 
-            // Disable old transforms
-            foreach (GameObject t in oldMode.transformActivates)
-                t.SetActive(false);
+            // Disable every other mode's transforms, rather than just the previously applied one. When a
+            // blueprint is loaded the variable already holds the saved index before Start() runs, so the
+            // "old" mode would be the mode we are switching to - leaving the prefab's default mode visible.
+            for (int i = 0; i < modes.Length; i++)
+                if (i != newModeIndex)
+                    foreach (GameObject t in modes[i].transformActivates)
+                        t.SetActive(false);
 
             // Move transforms
             foreach (MoveTransform move in newMode.transformMoves)
