@@ -64,7 +64,9 @@ namespace SFS.Parts.Modules
         }
         public static Orientation operator +(Orientation a, Orientation change)
         {
-            return new Orientation(change.x < 0? -a.x : a.x, change.y < 0? -a.y : a.y, change.z + a.z);
+            // A mirroring change (only one axis flipped) reverses the direction of the rotation it is applied on top of
+            float rotationSign = change.x * change.y < 0? -1 : 1;
+            return new Orientation(change.x < 0? -a.x : a.x, change.y < 0? -a.y : a.y, change.z + (a.z * rotationSign));
         }
 
         public Orientation GetCopy()

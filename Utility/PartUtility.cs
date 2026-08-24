@@ -165,7 +165,7 @@ namespace SFS.Parts
         {
             foreach (Part part in parts)
             {
-                part.orientation.orientation.Value += part.orientation.orientation.Value.InversedAxis() ? new Orientation(change.y, change.x, change.z) : change;
+                part.orientation.orientation.Value += change;
                 part.transform.localPosition = ((Vector2)part.transform.localPosition - pivot) * change + pivot;
                 part.RegenerateMesh();
             }
