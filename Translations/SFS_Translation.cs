@@ -719,7 +719,7 @@ namespace SFS
         // Engines
         public F Kolibri_RF9_Engine_Name => A(nameof(Kolibri_RF9_Engine_Name), "Kolibri RF9 Engine");
         public F Cerberus_R18_Engine_Name => A(nameof(Cerberus_R18_Engine_Name), "Cerberus R18 Engine");
-        public F Osprey_RTD_Engine_Name => A(nameof(Osprey_RTD_Engine_Name), "Osprey RTD Engine");
+        public F Osprey_RD2_Engine_Name => A(nameof(Osprey_RD2_Engine_Name), "Osprey RD2 Engine");
         public F Albatross_B4_Engine_Name => A(nameof(Albatross_B4_Engine_Name), "Albatross B4 Engine");
         public F Buzzard_P25_Engine_Name => A(nameof(Buzzard_P25_Engine_Name), "Buzzard P25 Engine");
         public F Harrier_L8_Engine_Name => A(nameof(Harrier_L8_Engine_Name), "Harrier L8 Engine");
@@ -727,6 +727,7 @@ namespace SFS
         public F Sparrow_SX_Engine_Name => A(nameof(Sparrow_SX_Engine_Name), "Sparrow SX Engine");
         public F Sparrow_SP_Engine_Name => A(nameof(Sparrow_SP_Engine_Name), "Sparrow SP Engine");
         public F Kinglet_K5_Engine_Name => A(nameof(Kinglet_K5_Engine_Name), "Kinglet K5 Engine");
+        public F Hornet_RTD_Engine_Name => A(nameof(Hornet_RTD_Engine_Name), "Hornet RTD Engine");
         public F Hawk_1D_Engine_Name => A(nameof(Hawk_1D_Engine_Name), "Hawk 1D Engine");
         public F Valiant_BV_Engine_Name => A(nameof(Valiant_BV_Engine_Name), "Valiant BV Engine");
         public F Valiant_BW_Engine_Name => A(nameof(Valiant_BW_Engine_Name), "Valiant BW Engine");
@@ -805,7 +806,7 @@ namespace SFS
         public F Cerberus_R18_Engine_Description => A(nameof(Cerberus_R18_Engine_Description), "Heavy twin-engine built for super-heavy launch vehicles, exceptional thrust but more mass");
         public F Valiant_BV_Engine_Description => A(nameof(Valiant_BV_Engine_Description), "Efficient and performant vacuum engine, suited for a wide range of deep-space missions");
         public F Valiant_BW_Engine_Description => A(nameof(Valiant_BW_Engine_Description), "Dual-engine vacuum array delivering increased thrust while preserving an excellent efficiency");
-        public F Osprey_RTD_Engine_Description => A(nameof(Osprey_RTD_Engine_Description), "High-performance vacuum engine built for deep-space missions, excellent efficiency");
+        public F Osprey_RD2_Engine_Description => A(nameof(Osprey_RD2_Engine_Description), "High-performance vacuum engine built for deep-space missions, excellent efficiency");
         public F Albatross_B4_Engine_Description => A(nameof(Albatross_B4_Engine_Description), "High-efficiency vacuum engine optimized for long-duration burns beyond atmospheres");
         public F Frontier_P2_Engine_Description => A(nameof(Frontier_P2_Engine_Description), "Powerful engine balancing thrust and efficiency, well suited for medium and heavy-lift vehicles");
         public F Martin_LM_Engine_Description => A(nameof(Martin_LM_Engine_Description), "Compact vacuum engine designed for precision maneuvers, landers, and orbital transfer stages");
@@ -813,6 +814,7 @@ namespace SFS
         public F Sparrow_SX_Engine_Description => A(nameof(Sparrow_SX_Engine_Description), "Ultra-light engine designed for small launchers and attitude stages, low thrust but extremely compact");
         public F Sparrow_SP_Engine_Description => A(nameof(Sparrow_SP_Engine_Description), "Ultra-light side engine designed for small launchers and attitude stages, low thrust but extremely compact");
         public F Kinglet_K5_Engine_Description => A(nameof(Kinglet_K5_Engine_Description), "Compact engine optimized for lightweight first stages and subtle maneuvers");
+        public F Hornet_RTD_Engine_Description => A(nameof(Hornet_RTD_Engine_Description), "Ultra-compact engine optimized for subtle maneuvers");
         public F Ion_Engine_Description => A(nameof(Ion_Engine_Description), "Low thrust engine with an incredibly high efficiency");
         // Boosters
         public F Booster_Description => A(nameof(Booster_Description), "Has high thrust but low efficiency booster\nCannot be turned off or throttle once ignited");
