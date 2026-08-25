@@ -494,6 +494,10 @@ namespace SFS
         public F Launch_Button => A(nameof(Launch_Button), "Launch");
         public F Move_Rocket_Button => A(nameof(Move_Rocket_Button), "Move Rocket");
         //
+        [LocSpace]
+        public F Gizmos_Snap_Smooth => A(nameof(Gizmos_Snap_Smooth), "Smooth");
+        public F Gizmos_Snap_Angle => A(nameof(Gizmos_Snap_Angle), "%value%°");
+        //
         [Documentation("Clear build area")]
         public F Clear_Warning => A(nameof(Clear_Warning), "Clear build area?");
         public F Clear_Confirm => A(nameof(Clear_Confirm), "Clear");
