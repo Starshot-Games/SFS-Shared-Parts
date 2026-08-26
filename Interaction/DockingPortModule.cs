@@ -106,8 +106,7 @@ namespace SFS.Parts.Modules
             Vector2 normal_A = Vector2.up * part.orientation;
             Vector2 normal_B = Vector2.up * otherPort.part.orientation;
 
-            Orientation diff = new Orientation(1, 1, (int)(Mathf.Atan2(normal_A.y, normal_A.x) * Mathf.Rad2Deg - Mathf.Atan2(normal_B.y, normal_B.x) * Mathf.Rad2Deg) + 180);
-            diff.z = Mathf.RoundToInt(diff.z / 90f) * 90;
+            Orientation diff = new Orientation(1, 1, Mathf.Atan2(normal_A.y, normal_A.x) * Mathf.Rad2Deg - Mathf.Atan2(normal_B.y, normal_B.x) * Mathf.Rad2Deg + 180);
 
             foreach (Part rocketPart in otherPort.Rocket.partHolder.parts)
                 rocketPart.orientation.orientation.Value += diff;
