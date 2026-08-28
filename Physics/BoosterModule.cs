@@ -46,6 +46,7 @@ namespace SFS.Parts.Modules
         public override float ThrustAmount => thrustVector.Value.magnitude;
         public override Vector2 ThrustNormal => thrustVector.Value.normalized;
         public override Vector2 ThrustPosition => thrustPosition.Value;
+        public override float Isp => ISP.Value * (float)Base.worldBase.settings.difficulty.IspMultiplier;
         public override bool HeatOn => true; // Boosters lack a "heat on" variable, so heat is always considered on
         public override GameObject HeatHolder => heatHolder;
         public override GameObject HeatHitbox => heatHitbox;
@@ -56,7 +57,7 @@ namespace SFS.Parts.Modules
         // Get
         double BurnTimeLeft => TotalBurnTime * fuelPercent.Value;
         double FuelMass => TotalFuelCapacity * fuelPercent.Value;
-        double TotalBurnTime => TotalFuelCapacity / (thrustVector.Value.magnitude / (ISP.Value * (float)Base.worldBase.settings.difficulty.IspMultiplier));
+        double TotalBurnTime => TotalFuelCapacity / (thrustVector.Value.magnitude / Isp);
         double TotalFuelCapacity => (1 - DryMassPercent) * wetMass.Value;
         double DryMassPercent => dryMassPercent.Value * (float)Base.worldBase.settings.difficulty.DryMassMultiplier;
 
@@ -71,7 +72,7 @@ namespace SFS.Parts.Modules
 
             // Thrust, burn time, isp
             drawer.DrawStat(53, thrustVector.Value.magnitude.ToThrustString());
-            drawer.DrawStat(52, ISP.Value.ToEfficiencyString());
+            drawer.DrawStat(52, Isp.ToEfficiencyString());
             drawer.DrawSpace(51);
             drawer.DrawStat(50, () => BurnTimeLeft.ToBurnTimeString(false), () => BurnTimeLeft.ToBurnTimeString(true), Register, Unregister);
 

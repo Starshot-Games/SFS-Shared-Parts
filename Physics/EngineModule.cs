@@ -46,6 +46,7 @@ namespace SFS.Parts.Modules
         public override float ThrustAmount => thrust.Value;
         public override Vector2 ThrustNormal => thrustNormal.Value;
         public override Vector2 ThrustPosition => thrustPosition.Value;
+        public override float Isp => ISP.Value * (float)Base.worldBase.settings.difficulty.IspMultiplier;
         public override bool HeatOn => heatOn.Value;
         public override GameObject HeatHolder => heatHolder;
         public override GameObject HeatHitbox => heatHitbox;
@@ -196,7 +197,7 @@ namespace SFS.Parts.Modules
         void RecalculateMassFlow()
         {
             float multiplier = transform.TransformVector(thrustNormal.Value).magnitude;
-            source.SetMassFlow(thrust.Value * multiplier * throttle_Out.Value / (ISP.Value * (float)Base.worldBase.settings.difficulty.IspMultiplier));
+            source.SetMassFlow(thrust.Value * multiplier * throttle_Out.Value / Isp);
         }
         void CheckOutOfFuel()
         {

@@ -12,6 +12,8 @@ namespace SFS.Parts.Modules
         public abstract Vector2 ThrustNormal { get; }
         public abstract Vector2 ThrustPosition { get; }
         
+        public abstract float Isp { get; } // Scaled by world difficulty setting
+
         public abstract bool HeatOn { get; }
         public abstract GameObject HeatHolder { get; }
         public abstract GameObject HeatHitbox { get; }
