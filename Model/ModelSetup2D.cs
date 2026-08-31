@@ -62,7 +62,7 @@ namespace SFS.Parts.Modules
         void ApplyDepth(MaterialPropertyBlock propertyBlock)
         {
             propertyBlock.SetFloat(DepthStart, GetGlobalDepth(0.5f, sortingLayer));
-            propertyBlock.SetFloat(DepthM, (GetGlobalDepth(1, sortingLayer) - GetGlobalDepth(0, sortingLayer)) * 0.05f);
+            propertyBlock.SetFloat(DepthM, (GetGlobalDepth(1, sortingLayer) - GetGlobalDepth(0, sortingLayer)) * 0.04f);
         }
         
         public static Vector2 GetLightDirection(Transform t)

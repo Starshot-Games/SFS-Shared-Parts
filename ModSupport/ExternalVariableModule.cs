@@ -21,6 +21,7 @@ namespace SFS.Parts.Modules
 		[Space] public Dref surfaceVelocityX = new();
 		public Dref surfaceVelocityY = new();
 		public Dref velocityMagnitude = new();
+		[Space] public Dref rocketMass = new();
 
 		[Space, Title("Rocket inputs")] public Dref rcsX = new();
 		public Dref rcsY = new();
@@ -88,6 +89,8 @@ namespace SFS.Parts.Modules
 				surfaceVelocityX.Value = rkt.physics.location.Value.velocity
 					.Rotate(0.0 - (rkt.physics.location.position.Value.AngleRadians - Math.PI / 2.0)).x;
 				surfaceVelocityY.Value = rkt.physics.location.Value.VerticalVelocity;
+
+				rocketMass.Value = rkt.rb2d.mass;
 
 				turnInput.Value = rkt.output_TurnAxisTorque.Value;
 				wheelsInput.Value = rkt.output_TurnAxisWheels.Value;
