@@ -769,13 +769,20 @@ namespace SFS
         public F Aerodynamic_Fuselage_Name => A(nameof(Aerodynamic_Fuselage_Name), "Aerodynamic Fuselage");
         public F Fairing_Name => A(nameof(Fairing_Name), "Fairing");
         // SaturnV
+        [Unexported]
         public F F1_Engine_Name => A(nameof(F1_Engine_Name), "F1 Engine");
+        [Unexported]
         public F J2_Engine_Name => A(nameof(J2_Engine_Name), "J2 Engine");
+        [Unexported]
         public F Service_Engine_Name => A(nameof(Service_Engine_Name), "Service Engine");
+        [Unexported]
         public F Lunar_Module_Descent_Engine_Name => A(nameof(Lunar_Module_Descent_Engine_Name), "Lunar Module Descent Engine");
         // Starship
+        [Unexported]
         public F Raptor_3_Engine_Name => A(nameof(Raptor_3_Engine_Name), "Raptor 3 Engine");
+        [Unexported]
         public F Super_Heavy_33_Raptor_3_Engines_Name => A(nameof(Super_Heavy_33_Raptor_3_Engines_Name), "Super_Heavy_33 Raptor 3 Engines");
+        [Unexported]
         public F Raptor_3_Vacuum_Engine_Name => A(nameof(Raptor_3_Vacuum_Engine_Name), "Raptor 3 Vacuum Engine");
         // Redstone Atlas
         public F A_7_Engine_Name => A(nameof(A_7_Engine_Name), "A-7 Engine");
