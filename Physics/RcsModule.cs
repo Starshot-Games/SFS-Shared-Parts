@@ -26,11 +26,16 @@ namespace SFS.Parts.Modules
         bool RCS_On { get => Rocket.arrowkeys.rcs.Value; set => Rocket.arrowkeys.rcs.Value = value; }
 
 
+        // Get
+        double IspMultiplier => Application.isPlaying && Base.worldBase.insideWorld.Value? Base.worldBase.settings.difficulty.IspMultiplier : 1;
+        float ScaledISP => ISP * (float)IspMultiplier;
+
+
         // Description
         void I_PartMenu.Draw(StatsMenu drawer, PartDrawSettings settings)
         {
             drawer.DrawStat(60, thrust.ToThrustString(), null);
-            drawer.DrawStat(50, ISP.ToEfficiencyString(), null);
+            drawer.DrawStat(50, ScaledISP.ToEfficiencyString(), null);
         }
 
 
@@ -109,7 +114,7 @@ namespace SFS.Parts.Modules
             if (force != Vector2.zero)
                 Rocket.rb2d.AddForceAtPosition(force * (thrust * throttle * 9.8f), transform.TransformPoint(thrustPosition));
 
-            source.SetMassFlow(thrust * throttle / ISP);
+            source.SetMassFlow(thrust * throttle / ScaledISP);
         }
 
         // Returns true if the angle from the thrust direction ± 90 is not bigger than the maximum torque angle delta

@@ -55,11 +55,15 @@ namespace SFS.Parts.Modules
 
 
         // Get
+        double IspMultiplier => Application.isPlaying && Base.worldBase.insideWorld.Value? Base.worldBase.settings.difficulty.IspMultiplier : 1;
+        double DryMassMultiplier => Application.isPlaying && Base.worldBase.insideWorld.Value? Base.worldBase.settings.difficulty.DryMassMultiplier : 1;
+        float ScaledISP => ISP.Value * (float)IspMultiplier;
+        //
         double BurnTimeLeft => TotalBurnTime * fuelPercent.Value;
         double FuelMass => TotalFuelCapacity * fuelPercent.Value;
-        double TotalBurnTime => TotalFuelCapacity / (thrustVector.Value.magnitude / Isp);
+        double TotalBurnTime => TotalFuelCapacity / (thrustVector.Value.magnitude / ScaledISP);
         double TotalFuelCapacity => (1 - DryMassPercent) * wetMass.Value;
-        double DryMassPercent => dryMassPercent.Value * (float)Base.worldBase.settings.difficulty.DryMassMultiplier;
+        double DryMassPercent => dryMassPercent.Value * DryMassMultiplier;
 
 
         // Description
@@ -72,7 +76,7 @@ namespace SFS.Parts.Modules
 
             // Thrust, burn time, isp
             drawer.DrawStat(53, thrustVector.Value.magnitude.ToThrustString());
-            drawer.DrawStat(52, Isp.ToEfficiencyString());
+            drawer.DrawStat(52, ScaledISP.ToEfficiencyString());
             drawer.DrawSpace(51);
             drawer.DrawStat(50, () => BurnTimeLeft.ToBurnTimeString(false), () => BurnTimeLeft.ToBurnTimeString(true), Register, Unregister);
 
