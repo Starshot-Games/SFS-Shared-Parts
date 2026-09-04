@@ -247,8 +247,11 @@ namespace SFS
         public F Parts_Expansion => A(nameof(Parts_Expansion), "Parts Expansion");
         public F Expand_View_Button => A(nameof(Expand_View_Button), "Expand View");
         public F Redstone_Atlas_Pack => A(nameof(Redstone_Atlas_Pack), "Redstone Atlas Pack");
+        [Unexported]
         public F Saturn5_Pack => A(nameof(Saturn5_Pack), "Saturn V Pack");
+        [Unexported]
         public F SLS_Pack => A(nameof(SLS_Pack), "SLS Pack");
+        [Unexported]
         public F Starship_Pack => A(nameof(Starship_Pack), "Starship Pack");
         public F Rockets_Bundle => A(nameof(Rockets_Bundle), "Rockets Bundle");
         public F Skins_Expansion => A(nameof(Skins_Expansion), "Skins Expansion");
@@ -334,7 +337,7 @@ namespace SFS
         public F OrderNotFound => A(nameof(OrderNotFound), "The purchase was not found, make sure the ID is correct.");
         public F OrderNotProcessed => A(nameof(OrderNotProcessed), "This purchase has not been processed properly.\nIt could have been refunded.");
         public F PurchaseNotConsumed => A(nameof(PurchaseNotConsumed), "This purchase should be functioning normally and can't be claimed.\nTry using the regular restore option.");
-        public F RestoredSuccessfully => A(nameof(PurchaseNotConsumed), "Restored purchases successfully:\n%products%");
+        public F RestoredSuccessfully => A(nameof(RestoredSuccessfully), "Restored purchases successfully:\n%products%");
         #endregion
 
         #region Sharing
@@ -839,13 +842,20 @@ namespace SFS
         public F Pegasus_A8_Booster_Description => A(nameof(Pegasus_A8_Booster_Description), "Small-sized solid rocket booster, can add an extra push to your upper stage");
         public F Python_S2_Booster_Description => A(nameof(Python_S2_Booster_Description), "Tiny solid rocket booster\nCannot be turned off or throttle once ignited");
         // SaturnV
+        [Unexported]
         public F F1_Engine_Description => A(nameof(F1_Engine_Description), "A high thrust - lower efficiency engine, used in the first stage of Saturn V");
+        [Unexported]
         public F J2_Engine_Description => A(nameof(J2_Engine_Description), "High efficiency, low thrust. Used in space when high thrust isn't a priority");
+        [Unexported]
         public F Service_Engine_Description => A(nameof(Service_Engine_Description), "High efficiency, low thrust. Used in space when high thrust isn't a priority");
+        [Unexported]
         public F Lunar_Module_Descent_Engine_Description => A(nameof(Lunar_Module_Descent_Engine_Description), "A tiny engine used for landers");
         // Starship
+        [Unexported]
         public F Raptor_3_Engine_Description => A(nameof(Raptor_3_Engine_Description), "Full-flow staged combustion, used in the Ship");
+        [Unexported]
         public F Super_Heavy_33_Raptor_3_Engines_Description => A(nameof(Super_Heavy_33_Raptor_3_Engines_Description), "Monstrous thrust - efficient 33 engines, used in the Super Heavy 3");
+        [Unexported]
         public F Raptor_3_Vacuum_Engine_Description => A(nameof(Raptor_3_Vacuum_Engine_Description), "High efficiency, low thrust. Used in space when high thrust isn't a priority");
         // Aerodynamics
         public F Aerodynamic_Nose_Cone_Description => A(nameof(Aerodynamic_Nose_Cone_Description), "An aerodynamic nose cone, used to improve the aerodynamics of side boosters");
