@@ -33,6 +33,7 @@ namespace SFS.Parts.Modules
         [Required] public GameObject heatHolder;
         [Required] public GameObject heatHitbox;
         Vector3 originalPosition;
+        Vector3 originalHitboxScale;
 
 
         // Injected
@@ -124,11 +125,14 @@ namespace SFS.Parts.Modules
 
             if (heatHitbox == null)
                 heatHitbox = heatHolder;
+            
+            // Cache the authored hitbox scale so throttle only scales it, instead of overwriting it
+            originalHitboxScale = heatHitbox.transform.localScale;
 
             throttle_Out.OnChange += () =>
             {
                 heatHolder.SetActive(throttle_Out.Value > 0);
-                heatHitbox.transform.localScale = new Vector3(1, throttle_Out.Value, 1);
+                heatHitbox.transform.localScale = new Vector3(originalHitboxScale.x, originalHitboxScale.y * throttle_Out.Value, 1);
             };
         }
 
