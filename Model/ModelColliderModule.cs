@@ -112,7 +112,11 @@ namespace SFS.Parts.Modules
                 return result;
 
             // Robust union of all triangles // NonZero merges the consistently-wound triangles
-            Paths64 solution = Clipper.Union(subject, FillRule.NonZero);
+            // Reversed so outer contours come out clockwise, like the other parts (drag surfaces rely on it) // Inflate below keeps the orientation
+            Clipper64 clipper = new Clipper64 { ReverseSolution = true };
+            clipper.AddSubject(subject);
+            Paths64 solution = new Paths64();
+            clipper.Execute(ClipType.Union, FillRule.NonZero, solution);
 
             // Close gaps between nearby islands (inflate then deflate by the same amount)
             if (mergeDistance > 0f)
