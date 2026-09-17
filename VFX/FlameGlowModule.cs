@@ -45,7 +45,8 @@ namespace SFS.Parts.Modules
 
 
         // Driven by EngineEffects - it gathers throttle/vacuum once and pushes them in here.
-        public void Apply(float throttle, float vacuum)
+        // visibility is its flame's: under 1 while a brighter flame burning alongside drowns it out.
+        public void Apply(float throttle, float vacuum, float visibility = 1)
         {
             if (glows == null)
                 return;
@@ -72,7 +73,7 @@ namespace SFS.Parts.Modules
                     // Color
                     Color color = Color.Lerp(groundData.color[i], vacuumData.color[i], vacuum);
 
-                    color.a *= throttle;
+                    color.a *= throttle * visibility;
                     a.color = color;
 
                     // Position

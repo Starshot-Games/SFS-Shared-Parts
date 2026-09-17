@@ -7,6 +7,9 @@ using UnityEngine;
 
 namespace SFS.Parts.Modules
 {
+    // Runs after the gimbal's MoveModule.Update, so the plume-merge solve (kicked off from Apply)
+    // sees the nozzle angle this frame will be drawn with rather than last frame's.
+    [DefaultExecutionOrder(100)]
     public class EngineEffects : MonoBehaviour
     {
         #if UNITY_EDITOR
@@ -62,8 +65,13 @@ namespace SFS.Parts.Modules
 
             foreach (FlameMeshModule m in flameMeshes)
                 m.Apply(throttle, vacuum, atmospherePressure);
+
+            // A flame drowned out under a brighter plume takes its glow down with it
+            float visibility = 1;
+            foreach (FlameMeshModule m in flameMeshes)
+                visibility = Mathf.Min(visibility, m.GetGlowVisibility());
             foreach (FlameGlowModule g in flameGlows)
-                g.Apply(throttle, vacuum);
+                g.Apply(throttle, vacuum, visibility);
 
             // Ease the nozzle glow once here, then push the value to each nozzle to render
             float glowDelta = 1 / (throttle > nozzleGlow.Value ? glowHeatUpTime : glowCoolDownTime) * Time.deltaTime;
