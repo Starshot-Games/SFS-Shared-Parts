@@ -12,7 +12,10 @@ namespace SFS.Parts.Modules
     {
         static readonly int DepthStart = Shader.PropertyToID("_DepthStart");
         static readonly int DepthM = Shader.PropertyToID("_DepthM");
-        static readonly int LightDirection = Shader.PropertyToID("_LightDirection");
+        static readonly int FlipSigns = Shader.PropertyToID("_FlipSigns");
+
+        // Degrees the R = 1 parts' diffuse flip is rotated by, relative to where the shadow flips.
+        const float RedDiffuseFlipRotation = 70;
 
         public MeshRenderer[] meshRenderers;
         
@@ -42,6 +45,7 @@ namespace SFS.Parts.Modules
         public void SetMesh()
         {
             Vector2 lightDirection = GetLightDirection(transform);
+            Vector2 redDiffuseLightDirection = RotateDegrees(lightDirection, RedDiffuseFlipRotation);
 
             foreach (MeshRenderer r in meshRenderers)
             {
@@ -50,12 +54,34 @@ namespace SFS.Parts.Modules
                     Debug.LogWarning("MeshRenderer is null");
                     continue;
                 }
+                
+                Vector2 flip = GetFlipSigns(r.transform, lightDirection);
+                float flipRedDiffuse = GetFlipSigns(r.transform, redDiffuseLightDirection).x;
 
                 MaterialPropertyBlock propertyBlock = new();
                 ApplyDepth(propertyBlock);
-                propertyBlock.SetVector(LightDirection, lightDirection); // Shader decides flip per-fragment from the UV axes vs this direction
+                propertyBlock.SetVector(FlipSigns, new Vector4(flip.x, flip.y, flipRedDiffuse, 0));
                 r.SetPropertyBlock(propertyBlock);
             }
+        }
+        
+        static Vector2 GetFlipSigns(Transform t, Vector2 lightDirection)
+        {
+            Matrix4x4 m = t.localToWorldMatrix;
+            Vector2 light = lightDirection.normalized;
+            float sX = Vector2.Dot(new Vector2(m.m00, m.m10).normalized, light);
+            float sY = Vector2.Dot(new Vector2(m.m01, m.m11).normalized, light);
+
+            return new Vector2(sX > 0.02f ? -1 : 1, sY < -0.02f ? -1 : 1);
+        }
+
+        // Rotates a vector counter-clockwise
+        static Vector2 RotateDegrees(Vector2 v, float degrees)
+        {
+            float a = degrees * Mathf.Deg2Rad;
+            float c = Mathf.Cos(a), s = Mathf.Sin(a);
+
+            return new Vector2(c * v.x - s * v.y, s * v.x + c * v.y);
         }
 
         // Writes the depth values ("Part 2d Model" shader convention) into the property block.
