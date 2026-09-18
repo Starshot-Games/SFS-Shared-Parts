@@ -52,6 +52,13 @@ namespace SFS.Parts.Modules
                     best = loop.points;
                 }
             }
+            // Drag surfaces expect clockwise loops // Guards against outlines cached before the winding was fixed
+            if (LoopArea(best) > 0)
+            {
+                best = (Vector2[])best.Clone();
+                Array.Reverse(best);
+            }
+
             return best;
         }
 
