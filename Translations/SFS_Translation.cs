@@ -50,6 +50,7 @@ namespace SFS
         [LocSpace]
         public F Development_Preview => A(nameof(Development_Preview), "Development Preview");
         public F Development_Preview_Explanation => A(nameof(Development_Preview_Explanation), "The development preview showcases future updates we are working on");
+        public F Development_Blog => A(nameof(Development_Blog), "Dev Blog");
         [LocSpace]
         public F Mod_Loader_OpenButton => A(nameof(Mod_Loader_OpenButton), "Mod Loader");
         public F Download_Mods => A(nameof(Download_Mods), "Download Mods");
@@ -236,6 +237,7 @@ namespace SFS
         #region Purchasing
         [Group("Purchasing")]
         public F Open_Shop_Menu => A(nameof(Open_Shop_Menu), "Shop");
+        public F Open_Shop_Button => A(nameof(Open_Shop_Button), "Shop");
         public F Open_Shop_Menu_2 => A(nameof(Open_Shop_Menu_2), "Open shop");
         [LocSpace]
         public F Expansions_List_Title => A(nameof(Expansions_List_Title), "Expansions & Packs");
