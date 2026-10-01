@@ -36,12 +36,6 @@ namespace SFS.Parts.Modules
             // When color or shape texture changes, regenerates mesh
             colorTextureName.OnChange += OnColorTextureChange;
             shapeTextureName.OnChange += OnShapeTextureChange;
-
-            // Purchasing
-            #if !UNITY_STANDALONE
-            Purchases.Main.HasSkins.OnChange += OnColorTextureChange;
-            Purchases.Main.HasSkins.OnChange += OnShapeTextureChange;
-            #endif
         }
 
         #if !UNITY_STANDALONE
@@ -49,9 +43,6 @@ namespace SFS.Parts.Modules
         {
             if (Base.sceneLoader.isUnloading)
                 return;
-            
-            Purchases.Main.HasSkins.OnChange -= OnColorTextureChange;
-            Purchases.Main.HasSkins.OnChange -= OnShapeTextureChange;
         }
         #endif
 
@@ -73,13 +64,8 @@ namespace SFS.Parts.Modules
         {
             for (int i = 0; i < meshModules.Length; i++)
             {
-                #if UNITY_STANDALONE
                 bool hasSkins = DevSettings.FullVersion;
                 bool hasRedstone = DevSettings.FullVersion;
-                #else
-                bool hasSkins = Purchases.Main.HasSkins.Value;
-                bool hasRedstone = Purchases.Main.HasRedstoneAtlas.Value;
-                #endif
 
                 string key = colorTextureName.Value;
                 Dictionary<string, ColorTexture> tex = Base.partsLoader.colorTextures;
@@ -90,13 +76,8 @@ namespace SFS.Parts.Modules
         {
             for (int i = 0; i < meshModules.Length; i++)
             {
-                #if UNITY_STANDALONE
                 bool hasSkins = DevSettings.FullVersion;
                 bool hasRedstone = DevSettings.FullVersion;
-                #else
-                bool hasSkins = Purchases.Main.HasSkins.Value;
-                bool hasRedstone = Purchases.Main.HasRedstoneAtlas.Value;
-                #endif
 
                 string key = shapeTextureName.Value;
                 Dictionary<string, ShapeTexture> tex = Base.partsLoader.shapeTextures;
@@ -137,10 +118,6 @@ namespace SFS.Parts.Modules
                 foreach (ColorTexture colorTexture in Base.partsLoader.colorTextures.Values)
                     if (colorTexture.tags.Contains(skinTag))
                         output.Add(colorTexture);
-
-            #if !UNITY_STANDALONE
-            output = output.Where(a => !a.pack_Redstone_Atlas || Purchases.Main.HasRedstoneAtlas.Value).ToList();
-            #endif
             
             return output;
         }
@@ -152,10 +129,6 @@ namespace SFS.Parts.Modules
                 foreach (ShapeTexture shapeTexture in Base.partsLoader.shapeTextures.Values)
                     if (shapeTexture.tags.Contains(skinTag))
                         output.Add(shapeTexture);
-
-            #if !UNITY_STANDALONE
-            output = output.Where(a => !a.pack_Redstone_Atlas || Purchases.Main.HasRedstoneAtlas.Value).ToList();
-            #endif
             
             return output;
         }
