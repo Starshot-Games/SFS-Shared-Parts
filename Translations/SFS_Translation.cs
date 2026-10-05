@@ -408,7 +408,7 @@ namespace SFS
         [Group("Settings Mobile")] // Settings
         public F Music_Name => A(nameof(Music_Name), "Music");
         public F Sound_Name => A(nameof(Sound_Name), "Sound");
-        public F Screen_Rotation_Name => A(nameof(Screen_Rotation_Name), "Screen Rotation");
+        public F Screen_Rotation_Name => A(nameof(Screen_Rotation_Name), "Auto Screen Rotation");
         public F FPS_Name => A(nameof(FPS_Name), "Fps");
         public F Language_Name => A(nameof(Language_Name), "Language");
         public F Menu_Scale => A(nameof(Menu_Scale), "Interface Scale");
