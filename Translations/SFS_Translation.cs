@@ -1255,9 +1255,7 @@ namespace SFS
         // Future
         #region Astronaut
         [Group("Astronaut")]
-        [LLMComment("Dismiss astronaut from service")]
         [Unexported] public F Discharge_Astronaut => A(nameof(Discharge_Astronaut), "Discharge {astronaut} ?");
-        [LLMComment("Dismiss astronaut from service")]
         [Unexported] public F Discharge => A(nameof(Discharge), "Discharge");
         [Unexported] public F Invalid_Astronaut_Name => A(nameof(Invalid_Astronaut_Name), "Invalid astronaut name");
         [Unexported] public F Astronaut_Already_Exists => A(nameof(Astronaut_Already_Exists), "Astronaut already exists");
