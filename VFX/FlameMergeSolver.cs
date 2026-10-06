@@ -34,6 +34,9 @@ namespace SFS.Parts.Modules
         public float mirror;       // -1 where this flame's x runs the other way across the group
         public float seed;
         public float eddyFlow;     // group lengths a second its turbulence streams down it
+        public float lead;         // the group's mean distance from its nozzles down to the merge plane
+        public float refLength;    // one plume length the whole group goes by, whatever its engines' sizes
+        public FlameNeighbour left, right;
 
         // Restates the merge in a mesh renderer's frame, given its local x/y axes measured in module space
         public FlameMerge InSpaceOf(float acrossScale, float alongScale)
@@ -46,6 +49,10 @@ namespace SFS.Parts.Modules
             float along = Mathf.Abs(alongScale);
 
             FlameMerge m = this;
+            m.lead = lead / along;
+            m.refLength = refLength / along;
+            m.left = (mirrored ? right : left).InSpaceOf(acrossScale, alongScale);
+            m.right = (mirrored ? left : right).InSpaceOf(acrossScale, alongScale);
             m.center = center / acrossScale;
             m.mirror = mirrored ? -mirror : mirror;
             m.halfSpan = halfSpan / across;
@@ -60,6 +67,28 @@ namespace SFS.Parts.Modules
             m.fadeLength = fadeLength / along;
             m.shareFadeLength = shareFadeLength / along;
             return m;
+        }
+    }
+
+    // A jet next to a flame in its merged plume, in that flame's space - its light runs on past the join between them. Mirrors neighbourFrame/Flow in the shader.
+    public struct FlameNeighbour
+    {
+        public bool present;
+        public Vector2 origin;  // its axis' x at along 0, and the along of its nozzle
+        public float slope;     // its axis' sideways travel per local y
+        public Vector2 scale;   // one of its local x and y units
+        public float exitPressure;
+        public float throttle;
+
+        public FlameNeighbour InSpaceOf(float acrossScale, float alongScale)
+        {
+            float along = Mathf.Abs(alongScale);
+
+            FlameNeighbour n = this;
+            n.origin = new Vector2(origin.x / acrossScale, origin.y / along);
+            n.slope = slope * along / acrossScale; // an x per a y, so both scalings apply
+            n.scale = new Vector2(scale.x / acrossScale, scale.y / along);
+            return n;
         }
     }
 
@@ -602,6 +631,11 @@ namespace SFS.Parts.Modules
             }
             nozzleSplits.Add(FarAway);
 
+            float lead = 0;
+            for (int k = from; k < to; k++)
+                lead += mergeDistance - flames[cluster[k]].along;
+            lead /= to - from;
+
             int smokeLeader = -1;
             float smokeWeight = 0;
             for (int k = from; k < to; k++)
@@ -625,6 +659,8 @@ namespace SFS.Parts.Modules
                 bool mirrored = flame.acrossScale < 0;
                 float splitStart = ToLocalAcross(nozzleSplits[k - from], flame);
                 float splitEnd = ToLocalAcross(nozzleSplits[k - from + 1], flame);
+                FlameNeighbour before = k > from ? GetNeighbour(flame, flames[cluster[k - 1]]) : default;
+                FlameNeighbour after = k + 1 < to ? GetNeighbour(flame, flames[cluster[k + 1]]) : default;
 
                 flame.module.merge = new FlameMerge
                 {
@@ -654,8 +690,30 @@ namespace SFS.Parts.Modules
                     mirror = mirrored ? -1 : 1,
                     seed = flames[cluster[from]].module.noiseSeed,
                     eddyFlow = eddySpeed / groupLength,
+                    lead = lead / flame.alongScale,
+                    refLength = referenceLength / flame.alongScale,
+                    left = mirrored ? after : before,
+                    right = mirrored ? before : after,
                 };
             }
+        }
+
+        // Another jet of the group, in this flame's space
+        static FlameNeighbour GetNeighbour(Flame flame, Flame other)
+        {
+            // Each axis' travel across the group per unit down it
+            float travel = other.drift * other.acrossScale / other.alongScale;
+            float ownTravel = flame.drift * flame.acrossScale / flame.alongScale;
+
+            return new FlameNeighbour
+            {
+                present = true,
+                origin = new Vector2(ToLocalAcross(other.across + travel * (flame.along - other.along), flame), (other.along - flame.along) / flame.alongScale),
+                slope = (travel - ownTravel) * flame.alongScale / flame.acrossScale,
+                scale = new Vector2(other.acrossScale / flame.acrossScale, other.alongScale / flame.alongScale),
+                exitPressure = other.exitPressure,
+                throttle = other.throttle,
+            };
         }
         
         static bool BurnAlike(Flame a, Flame b)

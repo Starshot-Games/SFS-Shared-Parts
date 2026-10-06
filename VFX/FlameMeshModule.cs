@@ -24,6 +24,10 @@ namespace SFS.Parts.Modules
             MergeDrift = Shader.PropertyToID("mergeDrift"),
             MergeStripeScale = Shader.PropertyToID("mergeStripeScale"),
             MergeRowStep = Shader.PropertyToID("mergeRowStep"),
+            MergeLead = Shader.PropertyToID("mergeLead"),
+            MergeRefLength = Shader.PropertyToID("mergeRefLength"),
+            NeighbourFrame = Shader.PropertyToID("neighbourFrame"),
+            NeighbourFlow = Shader.PropertyToID("neighbourFlow"),
             MergeCenter = Shader.PropertyToID("mergeCenter"),
             MergeHalfSpan = Shader.PropertyToID("mergeHalfSpan"),
             MergeThroat = Shader.PropertyToID("mergeThroat"),
@@ -89,6 +93,8 @@ namespace SFS.Parts.Modules
         static readonly Vector4[] glareAxis = new Vector4[FlameMergeSolver.MaxGlareSources];
         static readonly Vector4[] glareShape = new Vector4[FlameMergeSolver.MaxGlareSources];
         static readonly Vector4[] glareFlow = new Vector4[FlameMergeSolver.MaxGlareSources];
+        static readonly Vector4[] neighbourFrame = new Vector4[2];
+        static readonly Vector4[] neighbourFlow = new Vector4[2];
 
         // The shader reads diamondOffset off the material, and it shifts the envelope enough to move
         // where two plumes touch - so the solver has to take it from the same place.
@@ -297,6 +303,12 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(MergeDrift, meshMerge.drift);
                 propertyBlock.SetFloat(MergeStripeScale, meshMerge.stripeScale);
                 propertyBlock.SetFloat(MergeRowStep, GetRowStep(GetMesh(a)));
+                propertyBlock.SetFloat(MergeLead, meshMerge.lead);
+                propertyBlock.SetFloat(MergeRefLength, meshMerge.refLength);
+                SetNeighbour(0, meshMerge.left, throttle);
+                SetNeighbour(1, meshMerge.right, throttle);
+                propertyBlock.SetVectorArray(NeighbourFrame, neighbourFrame);
+                propertyBlock.SetVectorArray(NeighbourFlow, neighbourFlow);
                 propertyBlock.SetFloat(MergeCenter, meshMerge.center);
                 propertyBlock.SetFloat(MergeHalfSpan, meshMerge.halfSpan);
                 propertyBlock.SetFloat(MergeThroat, meshMerge.throat);
@@ -327,6 +339,13 @@ namespace SFS.Parts.Modules
             }
         }
         
+        // A missing neighbour still goes in as a valid jet, so the shader never divides by zero working it out
+        void SetNeighbour(int i, FlameNeighbour n, float throttle)
+        {
+            neighbourFrame[i] = n.present ? new Vector4(n.origin.x, n.origin.y, n.scale.x, n.scale.y) : new Vector4(0, 0, 1, 1);
+            neighbourFlow[i] = n.present ? new Vector4(n.slope, n.exitPressure, n.throttle, 1) : new Vector4(0, exitPressure, throttle, 0);
+        }
+
         public float GetGlowVisibility()
         {
             if (glareCount == 0)
@@ -602,24 +621,36 @@ namespace SFS.Parts.Modules
             float sliceLeft = outerLeft ? envelopeLeft : Mathf.Clamp(mergeCentre - merge.halfSpan + 2 * merge.halfSpan * share.x, envelopeLeft, envelopeRight);
             float sliceRight = outerRight ? envelopeRight : Mathf.Clamp(mergeCentre - merge.halfSpan + 2 * merge.halfSpan * share.y, envelopeLeft, envelopeRight);
 
-            float approach = merge.alongOffset > 1e-4f ? Mathf.Clamp01(along / merge.alongOffset) : 1;
+            // A pair is only split below the lower of its two nozzles
+            float startLeft = merge.left.present ? Mathf.Max(merge.left.origin.y, 0) : 0;
+            float startRight = merge.right.present ? Mathf.Max(merge.right.origin.y, 0) : 0;
+            float approachLeft = merge.alongOffset > startLeft + 1e-4f ? Mathf.Clamp01((along - startLeft) / (merge.alongOffset - startLeft)) : 1;
+            float approachRight = merge.alongOffset > startRight + 1e-4f ? Mathf.Clamp01((along - startRight) / (merge.alongOffset - startRight)) : 1;
             float planeLeft = mergeCentre - merge.halfSpan + 2 * merge.halfSpan * merge.share.x;
             float planeRight = mergeCentre - merge.halfSpan + 2 * merge.halfSpan * merge.share.y;
             Vector2 nozzleBounds = merge.nozzleBounds - Vector2.one * (merge.drift * along);
             bool merged = along >= merge.alongOffset;
+            bool joinLeft = !outerLeft && along >= startLeft;
+            bool joinRight = !outerRight && along >= startRight;
 
             left = outerLeft
                 ? Mathf.Lerp(left, sliceLeft, m)
-                : (merged ? sliceLeft : Mathf.Max(left, Mathf.Lerp(nozzleBounds.x, planeLeft, approach)));
+                : (!joinLeft ? left : (merged ? sliceLeft : Mathf.Lerp(nozzleBounds.x, planeLeft, approachLeft)));
             right = outerRight
                 ? Mathf.Lerp(right, sliceRight, m)
-                : (merged ? sliceRight : Mathf.Min(right, Mathf.Lerp(nozzleBounds.y, planeRight, approach)));
+                : (!joinRight ? right : (merged ? sliceRight : Mathf.Lerp(nozzleBounds.y, planeRight, approachRight)));
 
             // A covered outer slice closes up rather than inverting
             if (outerLeft)
                 left = Mathf.Min(left, right);
             if (outerRight)
                 right = Mathf.Max(right, left);
+
+            // Away from its joins a slice also draws its neighbours' light, as far as it reaches (GetReach in the shader)
+            if (!joinLeft)
+                left = Mathf.Min(left, Mathf.Min(GetNeighbourEdge(merge.left, along, atmospherePressure, -1), GetNeighbourEdge(merge.right, along, atmospherePressure, -1)));
+            if (!joinRight)
+                right = Mathf.Max(right, Mathf.Max(GetNeighbourEdge(merge.left, along, atmospherePressure, 1), GetNeighbourEdge(merge.right, along, atmospherePressure, 1)));
 
             // At a join with a neighbouring slice the geometry overshoots, and the join itself is
             // settled per fragment (GetSliceCover in the shader).
@@ -628,6 +659,17 @@ namespace SFS.Parts.Modules
                 left -= overshoot;
             if (!outerRight)
                 right += overshoot;
+        }
+
+        // A neighbouring jet's edge on one side (-1 left, 1 right) at a distance down this flame; none upstream of its nozzle
+        float GetNeighbourEdge(FlameNeighbour n, float along, float atmospherePressure, float side)
+        {
+            float alongN = (along - n.origin.y) / Mathf.Max(n.scale.y, 1e-6f);
+            if (!n.present || alongN < 0)
+                return -side * float.MaxValue;
+
+            float width = GetFlameWidth(Mathf.Clamp01(alongN / GetPlumeLength(n.exitPressure)), n.exitPressure, n.throttle, atmospherePressure, DiamondOffset);
+            return n.origin.x + n.slope * along + side * width * Mathf.Abs(n.scale.x);
         }
 
         // coverMargin and joinFeather in the flame shader
