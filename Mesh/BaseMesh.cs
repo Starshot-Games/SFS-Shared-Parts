@@ -16,6 +16,9 @@ namespace SFS.Parts.Modules
         // Generates mesh
         [Button] public abstract void GenerateMesh();
 
+        // BaseDepth units -> global depth (per sorting layer)
+        public const float DepthScale = 0.02f;
+
         static int baseDepthID = Shader.PropertyToID("_BaseDepth");
         static int depthMultiplierID = Shader.PropertyToID("_DepthMultiplier");
 
@@ -52,13 +55,13 @@ namespace SFS.Parts.Modules
             // Depth
             if (RenderSortingManager.main != null)
             {
-                baseDepth = RenderSortingManager.main.GetGlobalDepth(0.5f, sortingLayer) + baseDepth * 0.02f * 1f / Mathf.Max(RenderSortingManager.main.layers.Count, 1);
-                depthMultiplier = depthMultiplier * 0.02f * 1f / Mathf.Max(RenderSortingManager.main.layers.Count, 1);
+                baseDepth = RenderSortingManager.main.GetGlobalDepth(0.5f, sortingLayer) + baseDepth * DepthScale * 1f / Mathf.Max(RenderSortingManager.main.layers.Count, 1);
+                depthMultiplier = depthMultiplier * DepthScale * 1f / Mathf.Max(RenderSortingManager.main.layers.Count, 1);
             }
             else
             {
-                baseDepth = 0.5f + baseDepth * 0.02f;
-                depthMultiplier *= 0.02f;
+                baseDepth = 0.5f + baseDepth * DepthScale;
+                depthMultiplier *= DepthScale;
             }
             //
             mesh.SetUVs(3, depths);

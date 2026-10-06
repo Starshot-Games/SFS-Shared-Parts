@@ -417,6 +417,7 @@ namespace SFS
         public F Menu_Opacity => A(nameof(Menu_Opacity), "Interface Opacity");
         public F Shakes_Name => A(nameof(Shakes_Name), "Camera Shake");
         public F Orbit_Line_Count => A(nameof(Orbit_Line_Count), "Orbit Line Count");
+        public F Engine_Smoke => A(nameof(Engine_Smoke), "Engine Smoke");
         public F Anti_Aliasing => A(nameof(Anti_Aliasing), "Anti-Aliasing");
         public F Set_Save_Location => A(nameof(Set_Save_Location), "Set save location");
         public F Change_Save_Location => A(nameof(Change_Save_Location), "Change save location");

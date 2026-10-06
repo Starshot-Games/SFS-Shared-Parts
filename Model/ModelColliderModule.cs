@@ -233,8 +233,8 @@ namespace SFS.Parts.Modules
         }
 
 
-        // ---------- Raycast: read the depth encoded in the mesh (front-most vertex Z) ----------
-        // Mirrors "Part 2d Model" shader, which uses the world-space vertex Z as depth.
+        // ---------- Raycast: read the depth encoded in the mesh (front-most surface) ----------
+        // Mirrors "Part 2d Model" shader: depth = start - worldZ * DepthM, so the lowest world Z is in front.
         public override bool Raycast(UnityEngine.Object debugObject, Vector2 point, out float depth)
         {
             depth = BaseDepth;
@@ -246,13 +246,17 @@ namespace SFS.Parts.Modules
             int[] triangles = mesh.sharedMesh.triangles;
             Transform meshTransform = mesh.transform;
 
-            // Mesh into collider-local space (keeps Z, which is the depth)
+            // XY in collider-local space (matches the click point), Z in world space (what the shader reads)
             Vector3[] local = new Vector3[meshVertices.Length];
             for (int i = 0; i < meshVertices.Length; i++)
-                local[i] = transform.InverseTransformPoint(meshTransform.TransformPoint(meshVertices[i]));
+            {
+                Vector3 world = meshTransform.TransformPoint(meshVertices[i]);
+                Vector2 localPoint = transform.InverseTransformPoint(world);
+                local[i] = new Vector3(localPoint.x, localPoint.y, world.z);
+            }
 
             bool hit = false;
-            float frontZ = float.NegativeInfinity;
+            float frontZ = float.PositiveInfinity;
 
             for (int i = 0; i < triangles.Length; i += 3)
             {
@@ -264,7 +268,7 @@ namespace SFS.Parts.Modules
                     continue;
 
                 float z = a.z * u + b.z * v + c.z * w;
-                if (z > frontZ)
+                if (z < frontZ)
                 {
                     frontZ = z;
                     hit = true;
@@ -274,7 +278,8 @@ namespace SFS.Parts.Modules
             if (!hit)
                 return false;
 
-            depth = BaseDepth + frontZ;
+            // World Z into BaseDepth units, so it compares with the other parts' polygon depth
+            depth = BaseDepth - frontZ * (ModelSetup2D.DepthScale / BaseMesh.DepthScale);
             return true;
         }
         // 2D barycentric weights of point in triangle a/b/c // Returns false if outside

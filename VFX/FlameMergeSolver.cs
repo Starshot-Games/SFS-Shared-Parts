@@ -18,6 +18,9 @@ namespace SFS.Parts.Modules
         public float center;
         public float halfSpan;
         public float throat;
+        public float nozzleRadius; // the group's average nozzle half-width, the same for every flame in it
+        public bool leadsSmoke;    // whether this flame sends out the smoke of every flame in the group that leaves any, so it's drawn once
+        public float smokeNozzles; // their combined nozzle half-widths, over this flame's own
         public float groupLength;
         public float alongOffset;
         public float exitPressure;
@@ -27,6 +30,10 @@ namespace SFS.Parts.Modules
         public float additiveBlend;
         public float stripesWidth;
         public float stripesStrength;
+        public Vector2 turbulence; // in air and in vacuum
+        public float mirror;       // -1 where this flame's x runs the other way across the group
+        public float seed;
+        public float eddyFlow;     // group lengths a second its turbulence streams down it
 
         // Restates the merge in a mesh renderer's frame, given its local x/y axes measured in module space
         public FlameMerge InSpaceOf(float acrossScale, float alongScale)
@@ -40,8 +47,10 @@ namespace SFS.Parts.Modules
 
             FlameMerge m = this;
             m.center = center / acrossScale;
+            m.mirror = mirrored ? -mirror : mirror;
             m.halfSpan = halfSpan / across;
             m.throat = throat / across;
+            m.nozzleRadius = nozzleRadius / across;
             m.share = mirrored ? new Vector2(1 - share.y, 1 - share.x) : share;
             m.litShare = mirrored ? new Vector2(1 - litShare.y, 1 - litShare.x) : litShare;
             m.nozzleBounds = mirrored ? new Vector2(nozzleBounds.y, nozzleBounds.x) / acrossScale : nozzleBounds / acrossScale;
@@ -497,7 +506,8 @@ namespace SFS.Parts.Modules
 
             // The group's combined look
             Color color = default;
-            float additiveBlend = 0, stripesWidth = 0, stripesStrength = 0, light = 0;
+            Vector2 turbulence = default;
+            float additiveBlend = 0, stripesWidth = 0, stripesStrength = 0, eddySpeed = 0, light = 0;
 
             for (int k = from; k < to; k++)
             {
@@ -509,6 +519,8 @@ namespace SFS.Parts.Modules
                 additiveBlend += module.appliedAdditiveBlend * share;
                 stripesWidth += module.stripesWidth * share;
                 stripesStrength += module.stripesStrength * share;
+                turbulence += module.Turbulence * share;
+                eddySpeed += module.EddySpeed * flame.radius * share;
                 light += share;
             }
 
@@ -516,6 +528,8 @@ namespace SFS.Parts.Modules
             additiveBlend /= light;
             stripesWidth /= light;
             stripesStrength /= light;
+            turbulence /= light;
+            eddySpeed /= light;
 
             // Never shorter than the plumes it replaces, so no engine's mesh has to shrink to join.
             float groupLength = Mathf.Max(ownReach, referenceLength * Mathf.Pow(weight / referenceRadius, GroupLengthPower));
@@ -588,6 +602,19 @@ namespace SFS.Parts.Modules
             }
             nozzleSplits.Add(FarAway);
 
+            int smokeLeader = -1;
+            float smokeWeight = 0;
+            for (int k = from; k < to; k++)
+            {
+                Flame flame = flames[cluster[k]];
+                if (flame.module.smokeTrail == null)
+                    continue;
+
+                if (smokeLeader < 0)
+                    smokeLeader = k;
+                smokeWeight += flame.radius;
+            }
+
             for (int k = from; k < to; k++)
             {
                 Flame flame = flames[cluster[k]];
@@ -612,6 +639,9 @@ namespace SFS.Parts.Modules
                     center = (centre - flame.across) / flame.acrossScale,
                     halfSpan = span * 0.5f / Mathf.Abs(flame.acrossScale),
                     throat = weight / Mathf.Abs(flame.acrossScale),
+                    nozzleRadius = weight / (to - from) / Mathf.Abs(flame.acrossScale),
+                    leadsSmoke = k == smokeLeader,
+                    smokeNozzles = smokeWeight / flame.radius,
                     groupLength = groupLength / flame.alongScale,
                     alongOffset = (mergeDistance - flame.along) / flame.alongScale,
                     exitPressure = pressure,
@@ -620,6 +650,10 @@ namespace SFS.Parts.Modules
                     additiveBlend = additiveBlend,
                     stripesWidth = stripesWidth,
                     stripesStrength = stripesStrength,
+                    turbulence = turbulence,
+                    mirror = mirrored ? -1 : 1,
+                    seed = flames[cluster[from]].module.noiseSeed,
+                    eddyFlow = eddySpeed / groupLength,
                 };
             }
         }

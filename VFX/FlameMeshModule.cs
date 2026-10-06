@@ -35,11 +35,21 @@ namespace SFS.Parts.Modules
             MergeAdditiveBlend = Shader.PropertyToID("mergeAdditiveBlend"),
             MergeStripesWidth = Shader.PropertyToID("mergeStripesWidth"),
             MergeStripesStrength = Shader.PropertyToID("mergeStripesStrength"),
+            MergeTurbulence = Shader.PropertyToID("mergeTurbulence"),
+            MergeMirror = Shader.PropertyToID("mergeMirror"),
+            MergeSeed = Shader.PropertyToID("mergeSeed"),
+            NoiseSeed = Shader.PropertyToID("noiseSeed"),
+            EddyOffset = Shader.PropertyToID("eddyOffset"),
+            MergeEddyOffset = Shader.PropertyToID("mergeEddyOffset"),
+            EddyFlicker = Shader.PropertyToID("eddyFlicker"),
+            TurbulenceProperty = Shader.PropertyToID("_Turbulence"),
+            RoughnessProperty = Shader.PropertyToID("_Roughness"),
             GlareAxis = Shader.PropertyToID("glareAxis"),
             GlareShape = Shader.PropertyToID("glareShape"),
             GlareFlow = Shader.PropertyToID("glareFlow"),
             DiamondOffsetProperty = Shader.PropertyToID("diamondOffset"),
-            FlameColorProperty = Shader.PropertyToID("_FlameColor");
+            FlameColorProperty = Shader.PropertyToID("_FlameColor"),
+            FlameMaskProperty = Shader.PropertyToID("_FlameMask");
         
         
         // Debug preview - refreshes on validate. EngineEffects drives this at runtime.
@@ -69,6 +79,7 @@ namespace SFS.Parts.Modules
         [NonSerialized] public float appliedAtmospherePressure;
         [NonSerialized] public float appliedAdditiveBlend;
         [NonSerialized] public FlameMerge merge;
+        [NonSerialized] public SmokeTrailModule smokeTrail; // set by the smoke module while it's on, so a merged group can pick one to send out its smoke
         [NonSerialized] public FlameGlare[] glare = new FlameGlare[FlameMergeSolver.MaxGlareSources];
         [NonSerialized] public int glareCount;
         bool registered;
@@ -111,6 +122,47 @@ namespace SFS.Parts.Modules
                 return flameColor.Value;
             }
         }
+
+        // And how turbulent it gets, in air and in vacuum
+        Vector2? turbulence;
+        public Vector2 Turbulence
+        {
+            get
+            {
+                if (turbulence == null)
+                {
+                    Material material = GetPlumeMaterial(TurbulenceProperty);
+                    turbulence = material != null ? new Vector2(material.GetFloat(TurbulenceProperty), material.GetFloat(RoughnessProperty)) : Vector2.zero;
+                }
+
+                return turbulence.Value;
+            }
+        }
+
+        // Where in the turbulence pattern this flame sits, so engines side by side don't churn in step
+        [NonSerialized] public float noiseSeed;
+        void Awake() => noiseSeed = UnityEngine.Random.value;
+
+        // The turbulence streams down the plume as fast as the smoke leaves it, in nozzle half-widths a second
+        const float DefaultEddySpeed = 144; // for a flame that leaves no smoke to take it from
+        public float EddySpeed => smokeTrail != null ? smokeTrail.jetSpeed : DefaultEddySpeed;
+
+        // Noise tiles per plume length the turbulence's layers are laid down it at, eddyLarge and eddySmall in the shader
+        const float EddyLarge = 0.6f, EddySmall = 1.2f;
+        const float EddySmallSpeed = 1.25f; // the small eddies stream faster, so the pattern changes as it goes
+        // Noise tiles per plume length streamed that the layers wander across it, opposite ways, so the pattern never comes round again
+        const float LargeWander = 0.07f, SmallWander = -0.11f;
+        const float FlickerRate = 0.9f, FlickerWander = 0.0731f; // noise tiles a second
+
+        // How far the turbulence of a plume streaming at this many of its lengths a second has carried the noise by now, in tiles
+        static Vector4 GetEddyOffset(float flow, double time)
+        {
+            double streamed = time * flow;
+            return new Vector4(Frac(streamed * LargeWander), Frac(-streamed * EddyLarge), Frac(streamed * SmallWander), Frac(-streamed * EddySmall * EddySmallSpeed));
+        }
+
+        static Vector4 GetEddyFlicker(double time) => new(Frac(time * FlickerWander), Frac(-time * FlickerRate));
+        static float Frac(double value) => (float)(value - Math.Floor(value));
 
         // The plume's own material (not the shock train's), provided it has the given property
         Material GetPlumeMaterial(int property)
@@ -256,6 +308,16 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(MergeAdditiveBlend, meshMerge.additiveBlend);
                 propertyBlock.SetFloat(MergeStripesWidth, meshMerge.stripesWidth);
                 propertyBlock.SetFloat(MergeStripesStrength, meshMerge.stripesStrength);
+                propertyBlock.SetVector(MergeTurbulence, meshMerge.turbulence);
+                propertyBlock.SetFloat(MergeMirror, meshMerge.mirror);
+                propertyBlock.SetFloat(MergeSeed, meshMerge.seed);
+                propertyBlock.SetFloat(NoiseSeed, noiseSeed);
+
+                Transform space = a.meshRenderer.transform;
+                float flow = EddySpeed * space.TransformVector(Vector3.right).magnitude / (GetPlumeLength(exitPressure) * Mathf.Max(space.TransformVector(Vector3.up).magnitude, 1e-6f));
+                propertyBlock.SetVector(EddyOffset, GetEddyOffset(flow, Time.timeAsDouble));
+                propertyBlock.SetVector(MergeEddyOffset, GetEddyOffset(meshMerge.eddyFlow, Time.timeAsDouble));
+                propertyBlock.SetVector(EddyFlicker, GetEddyFlicker(Time.timeAsDouble));
 
                 a.meshRenderer.SetPropertyBlock(propertyBlock, 0);
                 
@@ -286,6 +348,152 @@ namespace SFS.Parts.Modules
             }
 
             return visibility / samples;
+        }
+
+        // How far down the mesh (0 at the nozzle, 1 at its far end) the drawn plume has faded out, as the shader shortens it with throttle
+        // How far down the mesh (0 at the nozzle, 1 at its far end) the plume has faded out, as the shader shortens it with throttle: this jet, or the group's merged plume
+        public float GetFadedOutMeshY(bool group) => Mathf.Lerp(0.01f, 1, group && merge.amount > 0 ? merge.throttle : appliedThrottle);
+
+        // The plume at meshY in world space - this jet, or the group's merged plume - as its middle, half-width, and how far down it that is
+        public void GetCrossSection(float meshY, bool group, out Vector2 centre, out float halfWidth, out float distance)
+        {
+            Transform space = GetPlumeSpace(out FlameMerge meshMerge);
+            PlumeSample sample = SamplePlume(meshY, meshMerge, group);
+
+            centre = space.TransformPoint(new Vector3(sample.centre, -sample.along));
+            halfWidth = sample.halfWidth * space.TransformVector(Vector3.right).magnitude;
+            distance = sample.along * space.TransformVector(Vector3.up).magnitude;
+        }
+
+        // The meshY that lies the given distance down the plume, as GetCrossSection measures it
+        public float GetMeshY(float distance)
+        {
+            Transform space = GetPlumeSpace(out FlameMerge meshMerge);
+            float ownLength = GetPlumeLength(exitPressure);
+            float extra = meshMerge.amount > 0 ? Mathf.Max(meshMerge.alongOffset + meshMerge.groupLength - ownLength, 0) : 0;
+            float along = Mathf.Max(distance, 0) / Mathf.Max(space.TransformVector(Vector3.up).magnitude, 1e-6f);
+
+            // along = meshY · (ownLength + extra · meshY), solved for meshY
+            return 2 * along / (ownLength + Mathf.Sqrt(ownLength * ownLength + 4 * extra * along));
+        }
+
+        // How bright the plume is down its middle at meshY, relative to a nozzle, as GetFlameEmission in the shader has it (T^4 going as width^-1.6).
+        // The group's merged plume comes out the same for every flame in it.
+        public float GetBrightness(float meshY, bool group)
+        {
+            GetPlumeSpace(out FlameMerge meshMerge);
+            PlumeSample sample = SamplePlume(meshY, meshMerge, group);
+
+            float lengthFade = Mathf.Clamp01(1 - meshY / GetFadedOutMeshY(group));
+            return Mathf.Pow(Mathf.Max(sample.widthRatio, 1e-4f), -1.6f) * lengthFade * GetMaskAlong(meshY);
+        }
+
+        // How far into the merge with its neighbours this flame is at meshY: 0 its own jet .. 1 wholly the group's plume, as the shader crossfades them
+        public float GetMergeAt(float meshY)
+        {
+            GetPlumeSpace(out FlameMerge meshMerge);
+            if (meshMerge.amount <= 0)
+                return 0;
+
+            float along = SamplePlume(meshY, meshMerge, false).along;
+            return Mathf.SmoothStep(0, 1, Mathf.InverseLerp(meshMerge.alongOffset, meshMerge.alongOffset + meshMerge.fadeLength, along)) * meshMerge.amount;
+        }
+
+        // The half-width of the nozzle the plume comes out of, in world space: this flame's own, or the average across the merged group
+        public float GetNozzleRadius(bool group)
+        {
+            Transform space = GetPlumeSpace(out FlameMerge meshMerge);
+            return (group && meshMerge.amount > 0 ? meshMerge.nozzleRadius : 1) * space.TransformVector(Vector3.right).magnitude;
+        }
+
+        // The renderer the plume is drawn with, and the merge restated in its frame
+        Transform GetPlumeSpace(out FlameMerge meshMerge)
+        {
+            foreach (MeshRef a in meshRenderers)
+            {
+                if (a.machDiamondsMesh || a.meshRenderer == null)
+                    continue;
+
+                Matrix4x4 toModule = transform.worldToLocalMatrix * a.meshRenderer.transform.localToWorldMatrix;
+                meshMerge = merge.InSpaceOf(toModule.MultiplyVector(Vector3.right).x, toModule.MultiplyVector(Vector3.up).y);
+                return a.meshRenderer.transform;
+            }
+
+            meshMerge = merge;
+            return transform;
+        }
+
+        struct PlumeSample
+        {
+            public float along, centre, halfWidth, widthRatio;
+        }
+
+        // The plume at meshY, before GetPlumeShape cuts it into slices: this jet on its own, or the group's whole envelope, which every flame in it agrees on
+        PlumeSample SamplePlume(float meshY, FlameMerge m, bool group)
+        {
+            float ownLength = GetPlumeLength(exitPressure);
+            bool merging = m.amount > 0;
+            float mergedLength = merging ? Mathf.Max(m.alongOffset + m.groupLength, ownLength) : ownLength;
+
+            PlumeSample sample;
+            sample.along = meshY * (ownLength + (mergedLength - ownLength) * meshY);
+            float ownWidth = GetFlameWidth(Mathf.Clamp01(sample.along / ownLength), exitPressure, appliedThrottle, appliedAtmospherePressure, DiamondOffset);
+            sample.centre = 0;
+            sample.halfWidth = sample.widthRatio = ownWidth;
+            if (!merging || !group)
+                return sample;
+
+            float groupT = Mathf.Clamp01((sample.along - m.alongOffset) / Mathf.Max(m.groupLength, 1e-4f));
+            float groupWidth = m.halfSpan + m.throat * (GetFlameWidth(groupT, m.exitPressure, m.throttle, appliedAtmospherePressure, DiamondOffset) - 1);
+
+            sample.centre = m.center - m.drift * sample.along;
+            sample.halfWidth = groupWidth;
+            sample.widthRatio = groupWidth / Mathf.Max(m.throat, 1e-4f);
+            return sample;
+        }
+
+        // The flame mask's alpha down the plume's middle, which the shader samples at 1 - v. It can't be read on the CPU, so it's read back once per texture.
+        static readonly Dictionary<Texture, float[]> maskProfiles = new();
+        float[] maskProfile;
+
+        float GetMaskAlong(float meshY)
+        {
+            if (maskProfile == null)
+            {
+                Material material = GetPlumeMaterial(FlameMaskProperty);
+                maskProfile = GetMaskProfile(material != null ? material.GetTexture(FlameMaskProperty) : null);
+            }
+
+            float x = Mathf.Clamp((1 - meshY) * maskProfile.Length - 0.5f, 0, maskProfile.Length - 1);
+            int i = Mathf.Min((int)x, maskProfile.Length - 2);
+            return Mathf.Lerp(maskProfile[i], maskProfile[i + 1], x - i);
+        }
+
+        static float[] GetMaskProfile(Texture mask)
+        {
+            if (mask == null)
+                return new float[] { 1, 1 };
+            if (maskProfiles.TryGetValue(mask, out float[] profile))
+                return profile;
+
+            const int Samples = 32;
+            RenderTexture target = RenderTexture.GetTemporary(1, Samples, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            RenderTexture active = RenderTexture.active;
+            Graphics.Blit(mask, target);
+
+            RenderTexture.active = target;
+            Texture2D readback = new(1, Samples, TextureFormat.RGBA32, false, true);
+            readback.ReadPixels(new Rect(0, 0, 1, Samples), 0, 0);
+            RenderTexture.active = active;
+            RenderTexture.ReleaseTemporary(target);
+
+            profile = new float[Samples];
+            for (int i = 0; i < Samples; i++)
+                profile[i] = readback.GetPixel(0, i).a;
+            Destroy(readback);
+
+            maskProfiles[mask] = profile;
+            return profile;
         }
 
         static Mesh GetMesh(MeshRef meshRef)

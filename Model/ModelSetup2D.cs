@@ -10,6 +10,9 @@ namespace SFS.Parts.Modules
 {
     public class ModelSetup2D : MonoBehaviour, I_InitializePartModule
     {
+        // World Z -> global depth (per sorting layer)
+        public const float DepthScale = 0.04f;
+
         static readonly int DepthStart = Shader.PropertyToID("_DepthStart");
         static readonly int DepthM = Shader.PropertyToID("_DepthM");
         static readonly int FlipSigns = Shader.PropertyToID("_FlipSigns");
@@ -88,7 +91,7 @@ namespace SFS.Parts.Modules
         void ApplyDepth(MaterialPropertyBlock propertyBlock)
         {
             propertyBlock.SetFloat(DepthStart, GetGlobalDepth(0.5f, sortingLayer));
-            propertyBlock.SetFloat(DepthM, (GetGlobalDepth(1, sortingLayer) - GetGlobalDepth(0, sortingLayer)) * 0.04f);
+            propertyBlock.SetFloat(DepthM, (GetGlobalDepth(1, sortingLayer) - GetGlobalDepth(0, sortingLayer)) * DepthScale);
         }
         
         public static Vector2 GetLightDirection(Transform t)

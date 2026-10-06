@@ -28,7 +28,7 @@ namespace SFS.Parts
                 }
 
                 // Get parts with highest depth value
-                hits = GetHighestDepthAtPoint(worldPoint, hits, threshold);
+                hits = GetHighestDepthAtPoint(worldPoint, hits);
 
                 if (hits.Length == 1)
                 {
@@ -49,7 +49,7 @@ namespace SFS.Parts
             hit = null;
             return false;
         }
-        static PartHit[] GetHighestDepthAtPoint(Vector2 worldPoint, PartHit[] hits, float threshold)
+        static PartHit[] GetHighestDepthAtPoint(Vector2 worldPoint, PartHit[] hits)
         {
             List<PartHit> highestDepthPolygons = new List<PartHit>();
 
@@ -57,26 +57,20 @@ namespace SFS.Parts
 
             foreach (PartHit hit in hits)
             {
-                foreach (PolygonData shape in hit.part.GetModules<PolygonData>())
-                {
-                    if (!hit.polygon.Click)
-                        continue;
-                    if (Polygon.GetDistanceToPolygons(worldPoint, shape.polygon.GetConvexPolygonsWorld(shape.transform)) > threshold)
-                        continue;
-                    
-                    if (!hit.polygon.Raycast(shape, shape.transform.InverseTransformPoint(worldPoint), out float depth))
-                        depth = float.NegativeInfinity;
+                PolygonData shape = hit.polygon;
 
-                    if (depth < bestDepth)
-                        continue;
+                if (!shape.Raycast(shape, shape.transform.InverseTransformPoint(worldPoint), out float depth))
+                    depth = float.NegativeInfinity;
 
-                    if (depth > bestDepth)
-                        highestDepthPolygons.Clear();
+                if (depth < bestDepth)
+                    continue;
 
-                    highestDepthPolygons.Add(hit);
+                if (depth > bestDepth)
+                    highestDepthPolygons.Clear();
 
-                    bestDepth = depth;
-                }
+                highestDepthPolygons.Add(hit);
+
+                bestDepth = depth;
             }
 
             return highestDepthPolygons.ToArray();
