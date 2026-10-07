@@ -12,6 +12,7 @@ namespace SFS.Parts.Modules
         const float ReferenceSpeed = 150; // m/s
         const float FlameEdge = 0.85f; // of the flame's half-width, where its mask fades out across it
         const float MinDensity = 0.25f; // however thin the air, it still slows the smoke as if at least this thick
+        const float Unseen = 0.005f; // of the flame's brightness at the nozzle, where it no longer shows
 
         [Required] public FlameMeshModule flame;
         [Required] public Material material;
@@ -60,21 +61,21 @@ namespace SFS.Parts.Modules
 
             // This jet's smoke hands over to the merged plume's as it merges with its neighbours, as the flame itself does, by how far
             // into the merge it is where its own smoke sets off. One flame of the group sends out the merged plume's smoke for all of them.
-            FindFade(false, out float ownStart, out float ownEnd);
+            FindFade(false, out float ownStart, out float ownEnd, out float ownGone);
             float merged = flame.GetMergeAt(ownStart);
-            Emit(ref ownTrail, false, ownStart, ownEnd, 1 - merged, planet, density, thinOut);
+            Emit(ref ownTrail, false, ownStart, ownEnd, ownGone, 1 - merged, planet, density, thinOut);
 
             if (flame.merge.amount > 0 && flame.merge.leadsSmoke)
             {
-                FindFade(true, out float groupStart, out float groupEnd);
-                Emit(ref groupTrail, true, groupStart, groupEnd, merged * flame.merge.smokeNozzles, planet, density, thinOut);
+                FindFade(true, out float groupStart, out float groupEnd, out float groupGone);
+                Emit(ref groupTrail, true, groupStart, groupEnd, groupGone, merged * flame.merge.smokeNozzles, planet, density, thinOut);
             }
             else
                 EndTrail(ref groupTrail);
         }
 
         // Feeds a trail from this jet's own plume or the group's merged one, putting out the given share of a nozzle's smoke
-        void Emit(ref SmokeTrail trail, bool group, float fadeStart, float fadeEnd, float share, Planet planet, float density, float thinOut)
+        void Emit(ref SmokeTrail trail, bool group, float fadeStart, float fadeEnd, float gone, float share, Planet planet, float density, float thinOut)
         {
             if (share < 1e-3f)
             {
@@ -87,6 +88,7 @@ namespace SFS.Parts.Modules
             flame.GetCrossSection(fadeStart, group, out Vector2 localStart, out float halfWidth, out float startDistance);
             flame.GetCrossSection(Mathf.Max(fadeStart - 0.05f * fadedOut, 0), group, out Vector2 upstream, out _, out _);
             flame.GetCrossSection(fadeEnd, group, out _, out _, out float endDistance);
+            flame.GetCrossSection(gone, group, out _, out _, out float goneDistance);
 
             Double2 birth = WorldView.ToGlobalPosition(localStart);
             if (IsUnderwater(planet, birth))
@@ -118,7 +120,7 @@ namespace SFS.Parts.Modules
             }
 
             double now = WorldTime.main.worldTime;
-            Carry(trail, group, direction, speed, endDistance, now);
+            Carry(trail, group, direction, speed, goneDistance, now);
 
             trail.color = color;
             trail.keepVisible = keepVisible;
@@ -137,8 +139,8 @@ namespace SFS.Parts.Modules
             return Mathf.SmoothStep(0, 1, Mathf.InverseLerp(to, from, Mathf.Log(Mathf.Max(density, 1e-9f))));
         }
 
-        // Moves the smoke still in the flame on down it, as fixed to it as the flame is to the craft, and lets it go where the flame ends
-        void Carry(SmokeTrail trail, bool group, Vector2 direction, float speed, float endDistance, double now)
+        // Moves the smoke still in the flame on down it, as fixed to it as the flame is to the craft and as wide, and lets it go where the flame no longer shows
+        void Carry(SmokeTrail trail, bool group, Vector2 direction, float speed, float releaseDistance, double now)
         {
             float step = speed * physicsStep;
             List<SmokeTrail.Point> points = trail.points;
@@ -155,18 +157,18 @@ namespace SFS.Parts.Modules
                 point.velocity = GetFlameVelocity(local) + direction * speed;
                 point.radius = Mathf.Max(point.radius, FlameEdge * halfWidth); // never narrows, though the flame pinches in at its diamonds
                 point.time = now;
-                point.held = point.along < endDistance;
+                point.held = point.along < releaseDistance;
                 points[i] = point;
             }
         }
 
-        // Where down the plume (as meshY) the flame has dimmed to fadeInFrom, and to fadeInTo, of its brightness at the nozzle
-        void FindFade(bool group, out float from, out float to)
+        // Where down the plume (as meshY) the flame has dimmed to fadeInFrom, and to fadeInTo, of its brightness at the nozzle, and where it's gone
+        void FindFade(bool group, out float from, out float to, out float gone)
         {
             const int Samples = 24;
             float end = flame.GetFadedOutMeshY(group);
-            from = to = end;
-            bool foundFrom = false;
+            from = to = gone = end;
+            bool foundFrom = false, foundTo = false;
 
             float previousY = 0, previous = flame.GetBrightness(0, group);
             for (int i = 1; i <= Samples; i++)
@@ -179,9 +181,14 @@ namespace SFS.Parts.Modules
                     from = Mathf.Lerp(previousY, y, Mathf.InverseLerp(previous, brightness, fadeInFrom));
                     foundFrom = true;
                 }
-                if (brightness <= fadeInTo)
+                if (!foundTo && brightness <= fadeInTo)
                 {
                     to = Mathf.Lerp(previousY, y, Mathf.InverseLerp(previous, brightness, fadeInTo));
+                    foundTo = true;
+                }
+                if (brightness <= Unseen)
+                {
+                    gone = Mathf.Lerp(previousY, y, Mathf.InverseLerp(previous, brightness, Unseen));
                     break;
                 }
 
@@ -190,6 +197,7 @@ namespace SFS.Parts.Modules
             }
 
             to = Mathf.Max(to, from);
+            gone = Mathf.Max(gone, to);
         }
 
         // How fast the flame moves through the air at this point, the craft's spin included
