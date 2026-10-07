@@ -20,7 +20,7 @@ namespace SFS.Parts.Modules
         [Space]
         public Color color = new(0.9f, 0.9f, 0.89f, 1);
         [Tooltip("Opacity (as optical depth) down the middle of the trail where it leaves the flame, at 150 m/s, sea level and full throttle")]
-        [Min(0)] public float thickness = 3;
+        [Min(0)] public float thickness = 2.2f;
         [Tooltip("How much thinner the air has to get to hide the smoke: its opacity goes with density ^ this")]
         [Min(0)] public float densityFalloff = 0.3f;
         [Tooltip("Air density, relative to sea level, the smoke starts to fade away at as the craft climbs")]
@@ -39,11 +39,20 @@ namespace SFS.Parts.Modules
         [Tooltip("s it takes sea-level air to slow the smoke to about a third of its speed through it, so it carries on with the flame's momentum before settling; thinner air slows it less")]
         [Min(0.01f)] public float dragTime = 1.2f;
         [Tooltip("How dim the flame has got, relative to its nozzle, where the smoke starts to show")]
-        [Range(0, 1)] public float fadeInFrom = 0.3f;
+        [Range(0, 1)] public float fadeInFrom = 0.06f;
         [Tooltip("How dim it has got where the smoke is fully in")]
-        [Range(0, 1)] public float fadeInTo = 0.03f;
+        [Range(0, 1)] public float fadeInTo = 0.002f;
+        [Tooltip("How much of the smoke shows while the plume isn't reaching the ground; all of it does once the ground is up where the smoke fades in")]
+        [Range(0, 1)] public float inAir = 1;
+        [Tooltip("How far on from where it has faded in, towards the end of the flame's turbulent tail, the smoke stays in the flame before it lets go")]
+        [Range(0, 1)] public float holdInTail = 0.3f;
 
         SmokeTrail ownTrail, groupTrail;
+        const int GroundStreams = 4; // per side where the plume hits the ground
+        readonly SmokeTrail[] ownGroundTrails = new SmokeTrail[GroundStreams * 2 - 1], groupGroundTrails = new SmokeTrail[GroundStreams * 2 - 1];
+        const int GroundSamples = 12; // down the plume
+        readonly Double2[] groundSamples = new Double2[GroundSamples];
+        readonly double[] groundAngles = new double[GroundSamples];
         Rigidbody2D body;
         float physicsTime = float.NaN; // Time.fixedTime last frame
         float physicsStep;             // s of physics run since then: the smoke in the flame moves on it, as the smoke let go does
@@ -63,37 +72,53 @@ namespace SFS.Parts.Modules
             // into the merge it is where its own smoke sets off. One flame of the group sends out the merged plume's smoke for all of them.
             FindFade(false, out float ownStart, out float ownEnd, out float ownGone);
             float merged = flame.GetMergeAt(ownStart);
-            Emit(ref ownTrail, false, ownStart, ownEnd, ownGone, 1 - merged, planet, density, thinOut);
+            Emit(ref ownTrail, ownGroundTrails, false, ownStart, ownEnd, ownGone, 1 - merged, planet, density, thinOut);
 
             if (flame.merge.amount > 0 && flame.merge.leadsSmoke)
             {
                 FindFade(true, out float groupStart, out float groupEnd, out float groupGone);
-                Emit(ref groupTrail, true, groupStart, groupEnd, groupGone, merged * flame.merge.smokeNozzles, planet, density, thinOut);
+                Emit(ref groupTrail, groupGroundTrails, true, groupStart, groupEnd, groupGone, merged * flame.merge.smokeNozzles, planet, density, thinOut);
             }
             else
+            {
                 EndTrail(ref groupTrail);
+                EndTrails(groupGroundTrails);
+            }
         }
 
         // Feeds a trail from this jet's own plume or the group's merged one, putting out the given share of a nozzle's smoke
-        void Emit(ref SmokeTrail trail, bool group, float fadeStart, float fadeEnd, float gone, float share, Planet planet, float density, float thinOut)
+        void Emit(ref SmokeTrail trail, SmokeTrail[] groundTrails, bool group, float fadeStart, float fadeEnd, float gone, float share, Planet planet, float density, float thinOut)
         {
             if (share < 1e-3f)
             {
                 EndTrail(ref trail);
+                EndTrails(groundTrails);
                 return;
             }
 
-            // Takes over from the plume as drawn as it dims, moving with it
+            // Smoke from a plume that hits the ground before it would show comes out there and spreads along it
             float fadedOut = flame.GetFadedOutMeshY(group);
+            float ground = FindGround(group, planet, Mathf.Min(Mathf.Lerp(fadeEnd, fadedOut, holdInTail), gone));
+            bool grounded = ground < fadeEnd;
+            float groundDepth = 0;
+            if (grounded)
+            {
+                groundDepth = fadeEnd > fadeStart ? Mathf.SmoothStep(0, 1, Mathf.InverseLerp(fadeEnd, fadeStart, ground)) : 1;
+                fadeEnd = ground;
+                fadeStart = Mathf.Min(fadeStart, ground);
+            }
+
+            // Follows the plume as it dims, some way into its tail or until the ground
             flame.GetCrossSection(fadeStart, group, out Vector2 localStart, out float halfWidth, out float startDistance);
             flame.GetCrossSection(Mathf.Max(fadeStart - 0.05f * fadedOut, 0), group, out Vector2 upstream, out _, out _);
             flame.GetCrossSection(fadeEnd, group, out _, out _, out float endDistance);
-            flame.GetCrossSection(gone, group, out _, out _, out float goneDistance);
+            flame.GetCrossSection(ground, group, out _, out _, out float releaseDistance);
 
             Double2 birth = WorldView.ToGlobalPosition(localStart);
             if (IsUnderwater(planet, birth))
             {
                 EndTrail(ref trail);
+                EndTrails(groundTrails);
                 return;
             }
 
@@ -109,24 +134,99 @@ namespace SFS.Parts.Modules
             float seaLevelRadius = FlameEdge * scaleX * FlameMeshModule.GetFlameWidth(0.5f, flame.exitPressure, 1, 1, flame.DiamondOffset);
 
             // Put out at the rate that gives a trail left at the reference speed its thickness
-            float massRate = thickness * throttle * share * Mathf.Pow(density, densityFalloff) * thinOut * ReferenceSpeed * seaLevelRadius / 0.9375f;
+            float massRate = thickness * throttle * share * Mathf.Pow(density, densityFalloff) * thinOut * ReferenceSpeed * seaLevelRadius / 0.9375f * Mathf.Lerp(inAir, 1, groundDepth);
             float expansionAfterAMinute = expansion * size / Mathf.Sqrt(Mathf.Max(density, 0.05f));
             float drag = Mathf.Max(density, MinDensity) / dragTime;
 
-            if (trail == null || trail.Removed || trail.planet != planet)
+            double now = WorldTime.main.worldTime;
+            float hidden = Mathf.Clamp01(2 * (1 - thinOut));
+            bool existing = trail != null && !trail.Removed;
+            float side = existing ? trail.side : Random.value < 0.5f ? -1 : 1;
+            float phase = existing ? trail.spreadPhase : Random.value;
+
+            // Off the ground it runs both ways in staggered streams, this trail the first
+            if (grounded)
             {
-                trail?.End();
-                trail = SmokeTrails.StartTrail(material, planet);
+                float rate = massRate / (GroundStreams * 2);
+                Feed(ref trail, side, phase, rate);
+                for (int i = 0; i < groundTrails.Length; i++)
+                {
+                    int stream = i + 1;
+                    float streamPhase = phase + (stream / 2 + stream % 2 * 0.5f) / GroundStreams;
+                    Feed(ref groundTrails[i], stream % 2 == 0 ? side : -side, streamPhase - Mathf.Floor(streamPhase), rate);
+                }
+            }
+            else
+            {
+                Feed(ref trail, side, phase, massRate);
+                EndTrails(groundTrails);
             }
 
-            double now = WorldTime.main.worldTime;
-            Carry(trail, group, direction, speed, goneDistance, now);
+            void Feed(ref SmokeTrail fed, float fedSide, float fedPhase, float rate)
+            {
+                if (fed == null || fed.Removed || fed.planet != planet || fed.side != fedSide || fed.spreadPhase != fedPhase)
+                {
+                    fed?.End();
+                    fed = SmokeTrails.StartTrail(material, planet, fedSide, fedPhase);
+                }
 
-            trail.color = color;
-            trail.keepVisible = keepVisible;
-            trail.fadeIn = Mathf.Max(endDistance - startDistance, 0.1f * radius);
-            float hidden = Mathf.Clamp01(2 * (1 - thinOut));
-            trail.Feed(birth, velocity, radius, startDistance, swell, expansionAfterAMinute, drag, lifetime, hidden, massRate, now);
+                Carry(fed, group, direction, speed, releaseDistance, now);
+
+                fed.color = color;
+                fed.keepVisible = keepVisible;
+                fed.fadeIn = Mathf.Max(endDistance - startDistance, 0.1f * radius);
+                fed.Feed(birth, velocity, radius, startDistance, swell, expansionAfterAMinute, drag, lifetime, hidden, rate, now);
+            }
+        }
+
+        // meshY where it first hits the ground, or end
+        float FindGround(bool group, Planet planet, float end)
+        {
+            const int Refinements = 5;
+
+            flame.GetCrossSection(end, group, out _, out _, out float reach);
+            double nozzleHeight = WorldView.ToGlobalPosition(transform.position).magnitude - planet.Radius;
+            if (nozzleHeight > System.Math.Max(planet.maxTerrainHeight, 0) + reach + 1)
+                return end;
+
+            for (int i = 0; i < GroundSamples; i++)
+            {
+                flame.GetCrossSection(end * (i + 1) / GroundSamples, group, out Vector2 local, out _, out _);
+                groundSamples[i] = WorldView.ToGlobalPosition(local);
+                groundAngles[i] = groundSamples[i].AngleRadians;
+            }
+            double[] heights = planet.GetTerrainHeightAtAngles(groundAngles, true);
+
+            float above = 0;
+            for (int i = 0; i < GroundSamples; i++)
+            {
+                float below = end * (i + 1) / GroundSamples;
+                if (groundSamples[i].magnitude >= planet.Radius + heights[i])
+                {
+                    above = below;
+                    continue;
+                }
+
+                for (int j = 0; j < Refinements; j++)
+                {
+                    float middle = (above + below) / 2;
+                    if (IsBelowSurface(planet, group, middle))
+                        below = middle;
+                    else
+                        above = middle;
+                }
+
+                return above;
+            }
+
+            return end;
+        }
+
+        bool IsBelowSurface(Planet planet, bool group, float meshY)
+        {
+            flame.GetCrossSection(meshY, group, out Vector2 local, out _, out _);
+            Double2 position = WorldView.ToGlobalPosition(local);
+            return position.magnitude < planet.Radius + planet.GetTerrainHeightAtAngle(position.AngleRadians, true);
         }
 
         // How much of the smoke is left as the air thins out: all of it below thinOutFrom, none past thinOutTo, and evenly with height in between
@@ -139,7 +239,7 @@ namespace SFS.Parts.Modules
             return Mathf.SmoothStep(0, 1, Mathf.InverseLerp(to, from, Mathf.Log(Mathf.Max(density, 1e-9f))));
         }
 
-        // Moves the smoke still in the flame on down it, as fixed to it as the flame is to the craft and as wide, and lets it go where the flame no longer shows
+        // Carries the smoke still in the flame down it and lets it go at releaseDistance
         void Carry(SmokeTrail trail, bool group, Vector2 direction, float speed, float releaseDistance, double now)
         {
             float step = speed * physicsStep;
@@ -267,6 +367,14 @@ namespace SFS.Parts.Modules
         {
             EndTrail(ref ownTrail);
             EndTrail(ref groupTrail);
+            EndTrails(ownGroundTrails);
+            EndTrails(groupGroundTrails);
+        }
+
+        static void EndTrails(SmokeTrail[] trails)
+        {
+            for (int i = 0; i < trails.Length; i++)
+                EndTrail(ref trails[i]);
         }
 
         static void EndTrail(ref SmokeTrail trail)

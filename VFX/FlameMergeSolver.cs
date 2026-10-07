@@ -14,6 +14,8 @@ namespace SFS.Parts.Modules
         public float shareFadeLength;
         public Vector2 nozzleBounds;
         public float drift;
+        public float bend; // where its jet has eased onto the group's heading
+        public Vector2 closeLength; // how far past the merge plane each join closes
         public float stripeScale;
         public float center;
         public float halfSpan;
@@ -62,6 +64,8 @@ namespace SFS.Parts.Modules
             m.litShare = mirrored ? new Vector2(1 - litShare.y, 1 - litShare.x) : litShare;
             m.nozzleBounds = mirrored ? new Vector2(nozzleBounds.y, nozzleBounds.x) / acrossScale : nozzleBounds / acrossScale;
             m.drift = drift * along / acrossScale; // an x per a y, so both scalings apply
+            m.bend = bend / along;
+            m.closeLength = (mirrored ? new Vector2(closeLength.y, closeLength.x) : closeLength) / along;
             m.groupLength = groupLength / along;
             m.alongOffset = alongOffset / along;
             m.fadeLength = fadeLength / along;
@@ -76,6 +80,8 @@ namespace SFS.Parts.Modules
         public bool present;
         public Vector2 origin;  // its axis' x at along 0, and the along of its nozzle
         public float slope;     // its axis' sideways travel per local y
+        public float drift; // travel its jet gives up easing onto the group's heading
+        public float bend; // over this far down it
         public Vector2 scale;   // one of its local x and y units
         public float exitPressure;
         public float throttle;
@@ -87,6 +93,8 @@ namespace SFS.Parts.Modules
             FlameNeighbour n = this;
             n.origin = new Vector2(origin.x / acrossScale, origin.y / along);
             n.slope = slope * along / acrossScale; // an x per a y, so both scalings apply
+            n.drift = drift * along / acrossScale;
+            n.bend = bend / along;
             n.scale = new Vector2(scale.x / acrossScale, scale.y / along);
             return n;
         }
@@ -149,8 +157,13 @@ namespace SFS.Parts.Modules
         public const int MaxGlareSources = 3;
         // How far out from a bright plume's axis whatever is under it is drowned out in full, as a fraction of the plume's half-width
         public const float GlareCore = 0.2f;
-        // How far downstream to look for two jets meeting, as a fraction of their length.
-        const float TouchSearchLength = 0.7f;
+        // Whole plume, so the presence ramp eases a late touch out
+        const float TouchSearchLength = 1f;
+        // how far past their glows jets pull each other in
+        const float EntrainReach = 0.15f;
+        // mixing layer spread per unit down, at sea level
+        const float EntrainSpread = 0.1f;
+        const float EntrainThinAir = 0.01f; // dies away below this pressure
         // Crossfade into one plume, as a fraction of the merged plume. A distance rather than a
         // share of each mesh, so the whole group finishes merging at the same point.
         const float FadeLength = 0.4f;
@@ -159,6 +172,10 @@ namespace SFS.Parts.Modules
         // How strongly a bigger group stretches the plume
         const float GroupLengthPower = 0.5f;
         const int TouchSamples = 16;
+        // reach past the first touch for full presence, of plume length
+        const float PresenceRamp = 0.25f;
+        // least bend, of plume length
+        const float MinBend = 0.3f;
         // "No neighbour on this side". Finite so it survives being interpolated in the shader.
         const float FarAway = 1e6f;
 
@@ -171,11 +188,15 @@ namespace SFS.Parts.Modules
         static readonly List<int> cluster = new List<int>();
         static readonly List<float> boundaries = new List<float>();
         static readonly List<float> litBoundaries = new List<float>();
+        static readonly List<float> dimmedBoundaries = new List<float>();
         static readonly List<GlareSource> glareSources = new List<GlareSource>();
 
         // The cluster being solved, in craft space - what ApplyGroup needs to say where its plume is
         static Vector2 clusterOrigin, clusterDown;
         static readonly List<float> nozzleSplits = new List<float>();
+        static readonly List<int> sequence = new List<int>(); // jets whose plumes reach a neighbour
+        static readonly List<int> run = new List<int>(); // one merged plume
+        static readonly List<float> runTouches = new List<float>(); // where each meets the one before
 
         // Comparers, not lambdas: these sort every frame and List.Sort wraps a Comparison in a new object.
         static readonly IComparer<FlameMeshModule> byCraft = Comparer<FlameMeshModule>.Create(
@@ -410,38 +431,71 @@ namespace SFS.Parts.Modules
             // Left to right, so neighbours in the merged plume are neighbours in this list.
             cluster.Sort(byAcross);
 
-            // Jets merge where their envelopes first meet
-            int runStart = 0;
-            float mergeDistance = float.NegativeInfinity;
-
-            for (int k = 1; k < cluster.Count; k++)
+            // A jet joins only as far as its plume reaches past where it would meet a neighbour
+            sequence.Clear();
+            for (int i = 0; i < cluster.Count; i++)
             {
-                bool touches = TryGetTouchDistance(flames[cluster[k - 1]], flames[cluster[k]], out float touch);
+                Flame flame = flames[cluster[i]];
+                float meets = float.PositiveInfinity;
+                if (i > 0 && TryGetTouchDistance(flames[cluster[i - 1]], flame, out float before))
+                    meets = before;
+                if (i + 1 < cluster.Count && TryGetTouchDistance(flame, flames[cluster[i + 1]], out float after))
+                    meets = Mathf.Min(meets, after);
 
-                if (touches)
+                float reach = flame.along + flame.length * Mathf.Lerp(0.01f, 1, flame.throttle);
+                flame.presence = float.IsInfinity(meets) ? 0 : Mathf.SmoothStep(0, 1, (reach - meets) / (PresenceRamp * flame.length));
+                flames[cluster[i]] = flame;
+                if (flame.presence > 0)
+                    sequence.Add(cluster[i]);
+            }
+
+            // Jets merge where their envelopes first meet
+            run.Clear();
+            runTouches.Clear();
+            foreach (int next in sequence)
+            {
+                if (run.Count > 0 && TryGetTouchDistance(flames[run[run.Count - 1]], flames[next], out float touch))
                 {
-                    // The run is only fully merged once its last pair has come together.
-                    mergeDistance = Mathf.Max(mergeDistance, touch);
+                    run.Add(next);
+                    runTouches.Add(touch);
                     continue;
                 }
 
-                if (k - runStart >= 2)
-                    ApplyGroup(runStart, k, mergeDistance);
+                ApplyRun();
+                run.Add(next);
+                runTouches.Add(float.PositiveInfinity);
+            }
+            ApplyRun();
+        }
 
-                runStart = k;
-                mergeDistance = float.NegativeInfinity;
+        static void ApplyRun()
+        {
+            // The run is only fully merged once its last pair has come together
+            if (run.Count >= 2)
+            {
+                float mergeDistance = float.NegativeInfinity;
+                for (int k = 1; k < run.Count; k++)
+                {
+                    // A jet that barely takes part gives way to the one beyond it
+                    float touch = runTouches[k];
+                    float dimmer = GetDimmer(flames[run[k - 1]], flames[run[k]]);
+                    int beyond = dimmer > 0 ? k - 2 : k + 1;
+                    if (dimmer != 0 && beyond >= 0 && beyond < run.Count
+                        && TryGetTouchDistance(flames[run[Mathf.Min(beyond, k - 1)]], flames[run[Mathf.Max(beyond, k)]], out float across))
+                        touch = Mathf.Lerp(touch, across, Mathf.Abs(dimmer));
+                    mergeDistance = Mathf.Max(mergeDistance, touch);
+                }
+                ApplyGroup(mergeDistance);
             }
 
-            if (cluster.Count - runStart >= 2)
-                ApplyGroup(runStart, cluster.Count, mergeDistance);
+            run.Clear();
+            runTouches.Clear();
         }
 
         // How far downstream two jets first touch, if they do within their length
         static bool TryGetTouchDistance(Flame a, Flame b, out float touch)
         {
             touch = 0;
-
-            float separation = Mathf.Abs(b.across - a.across);
 
             // Both jets only exist downstream of the lower of the two nozzles.
             float from = Mathf.Max(a.along, b.along);
@@ -451,33 +505,69 @@ namespace SFS.Parts.Modules
             float to = Mathf.Min(from + TouchSearchLength * Mathf.Max(a.length, b.length),
                                  Mathf.Min(a.along + a.length, b.along + b.length));
 
+            float lastDistance = from, lastOverlap = 0;
             for (int i = 0; i <= TouchSamples; i++)
             {
                 float distance = Mathf.Lerp(from, to, (float)i / TouchSamples);
 
-                if (GetHalfWidth(a, distance) + GetHalfWidth(b, distance) >= separation)
+                // A jet pointing away is still drawn in, as if side by side
+                float separation = Mathf.Min(b.across - a.across, GetAxis(b, distance) - GetAxis(a, distance));
+                float overlap = GetMixingWidth(a, distance) + GetMixingWidth(b, distance) - separation;
+                if (overlap >= 0)
                 {
-                    touch = distance;
+                    // Interpolated so the touch doesn't step between samples
+                    touch = i == 0 ? distance : Mathf.Lerp(lastDistance, distance, -lastOverlap / (overlap - lastOverlap));
                     return true;
                 }
+
+                lastDistance = distance;
+                lastOverlap = overlap;
             }
 
             return false;
         }
 
-        // This jet's half-width at an absolute distance down the cluster's axis, in craft units.
-        static float GetHalfWidth(Flame flame, float distance)
+        static float GetAxis(Flame flame, float distance) => flame.across + GetTravel(flame) * (distance - flame.along);
+
+        static float GetDrawnAxis(Flame flame, float distance) => flame.across + GetTravel(flame) * GetBent(distance - flame.along, flame.bend);
+
+        static float GetTravel(Flame flame) => flame.drift * flame.acrossScale / flame.alongScale;
+
+        static float GetBent(float distance, float bend)
         {
-            float y = Mathf.Clamp01((distance - flame.along) / flame.length);
-            return flame.radius * FlameMeshModule.GetFlameWidth(y, flame.exitPressure, flame.throttle, flame.atmospherePressure, flame.diamondOffset);
+            distance = Mathf.Max(distance, 0);
+            return bend <= 0 ? distance : distance < bend ? distance - distance * distance / (2 * bend) : bend / 2;
         }
 
-        // Turns one run of engines (from..to into cluster) into a single merged plume.
-        static void ApplyGroup(int from, int to, float mergeDistance)
+        // Off the smooth envelope, or the first touch would skip between diamond bulges
+        static float GetMixingWidth(Flame flame, float distance)
         {
+            return GetHalfWidth(flame, distance, false) * (1 + EntrainReach);
+        }
+
+        // This jet's half-width at an absolute distance down the cluster's axis, in craft units.
+        static float GetHalfWidth(Flame flame, float distance, bool ripple = true)
+        {
+            float y = Mathf.Clamp01((distance - flame.along) / flame.length);
+            return flame.radius * FlameMeshModule.GetFlameWidth(y, flame.exitPressure, flame.throttle, flame.atmospherePressure, flame.diamondOffset, ripple);
+        }
+
+        // Turns one run of engines into a single merged plume.
+        static void ApplyGroup(float mergeDistance)
+        {
+            int from = 0, to = run.Count;
             // The merge plane: where the last pair came together, never upstream of any nozzle.
             for (int k = from; k < to; k++)
-                mergeDistance = Mathf.Max(mergeDistance, flames[cluster[k]].along);
+                mergeDistance = Mathf.Max(mergeDistance, flames[run[k]].along);
+
+            // A jet off the group's heading is turned onto it where it meets a neighbour
+            for (int k = from; k < to; k++)
+            {
+                Flame flame = flames[run[k]];
+                float meets = Mathf.Min(k > from ? runTouches[k] : float.PositiveInfinity, k + 1 < to ? runTouches[k + 1] : float.PositiveInfinity);
+                flame.bend = Mathf.Max(2 * Mathf.Max(meets - flame.along, 0), MinBend * flame.length);
+                flames[run[k]] = flame;
+            }
 
             // Slice the envelope at that plane
             float envelopeLeft = float.PositiveInfinity;
@@ -485,12 +575,13 @@ namespace SFS.Parts.Modules
 
             for (int k = from; k < to; k++)
             {
-                Flame flame = flames[cluster[k]];
+                Flame flame = flames[run[k]];
                 float halfWidth = GetHalfWidth(flame, mergeDistance);
+                float axis = GetDrawnAxis(flame, mergeDistance);
 
-                flame.edgeLeft = flame.across - halfWidth;
-                flame.edgeRight = flame.across + halfWidth;
-                flames[cluster[k]] = flame;
+                flame.edgeLeft = axis - halfWidth;
+                flame.edgeRight = axis + halfWidth;
+                flames[run[k]] = flame;
 
                 envelopeLeft = Mathf.Min(envelopeLeft, flame.edgeLeft);
                 envelopeRight = Mathf.Max(envelopeRight, flame.edgeRight);
@@ -500,38 +591,67 @@ namespace SFS.Parts.Modules
             boundaries.Add(envelopeLeft);
             for (int k = from + 1; k < to; k++)
                 // Kept in order even if one jet has swallowed another, so no slice can invert.
-                boundaries.Add(Mathf.Max((flames[cluster[k - 1]].edgeRight + flames[cluster[k]].edgeLeft) * 0.5f, boundaries[boundaries.Count - 1]));
+                boundaries.Add(Mathf.Max((flames[run[k - 1]].edgeRight + flames[run[k]].edgeLeft) * 0.5f, boundaries[boundaries.Count - 1]));
             boundaries.Add(Mathf.Max(envelopeRight, boundaries[boundaries.Count - 1]));
+
+            // A jet that barely takes part is already spread over at the merge plane
+            dimmedBoundaries.Clear();
+            dimmedBoundaries.AddRange(boundaries);
+            for (int k = from + 1; k < to; k++)
+            {
+                float dimmer = GetDimmer(flames[run[k - 1]], flames[run[k]]);
+                dimmedBoundaries[k - from] = Mathf.Lerp(boundaries[k - from], boundaries[k - from + (dimmer > 0 ? -1 : 1)], Mathf.Abs(dimmer));
+            }
+            for (int k = 1; k + 1 < dimmedBoundaries.Count - 1; k++)
+                if (dimmedBoundaries[k + 1] < dimmedBoundaries[k])
+                    dimmedBoundaries[k] = dimmedBoundaries[k + 1] = (dimmedBoundaries[k] + dimmedBoundaries[k + 1]) * 0.5f;
+            for (int k = 1; k < dimmedBoundaries.Count; k++)
+                boundaries[k] = Mathf.Max(dimmedBoundaries[k], boundaries[k - 1]);
 
             float span = envelopeRight - envelopeLeft;
             if (span < 1e-5f)
                 return;
 
-            // The group's combined numbers
-            float referenceRadius = 0, referenceLength = 0;
-            float pressure = 0, throttle = 0, luminosity = 0, weight = 0;
-            float ownReach = 0; // how far past the merge plane the individual plumes would have gone
+            // The group's combined numbers, weighed by thrust
+            float pressure = 0, throttle = 0, luminosity = 0, thrust = 0, presence = 0;
 
             for (int k = from; k < to; k++)
             {
-                Flame flame = flames[cluster[k]];
+                Flame flame = flames[run[k]];
+                float jet = flame.radius * flame.presence * flame.throttle;
 
-                if (flame.radius > referenceRadius)
-                {
-                    referenceRadius = flame.radius;
-                    referenceLength = flame.length;
-                }
-
-                pressure += flame.exitPressure * flame.radius;
-                throttle += flame.throttle * flame.radius;
-                luminosity += GetLuminosity(flame) * flame.radius;
-                weight += flame.radius;
-                ownReach = Mathf.Max(ownReach, flame.along + flame.length - mergeDistance);
+                pressure += flame.exitPressure * jet;
+                throttle += flame.throttle * jet;
+                luminosity += GetLuminosity(flame) * jet;
+                thrust += jet;
+                presence += flame.presence;
             }
 
-            pressure /= weight;
-            throttle /= weight;
-            luminosity /= weight;
+            thrust = Mathf.Max(thrust, 1e-6f);
+            pressure /= thrust;
+            throttle /= thrust;
+            luminosity /= thrust;
+
+            // Each jet's part of the group's nozzle, by its thrust
+            float lengthPerRadius = 0, weight = 0, parts = 0;
+            float ownReach = 0; // how far past the merge plane the single plumes would go
+
+            for (int k = from; k < to; k++)
+            {
+                Flame flame = flames[run[k]];
+                flame.part = flame.presence * flame.throttle / throttle;
+                flames[run[k]] = flame;
+
+                float radius = flame.radius * flame.part;
+                lengthPerRadius += flame.length / flame.radius * radius;
+                weight += radius;
+                parts += flame.part;
+                ownReach = Mathf.Max(ownReach, (flame.along + flame.length - mergeDistance) * flame.part);
+            }
+
+            lengthPerRadius /= weight;
+            float referenceRadius = weight / parts;
+            float referenceLength = lengthPerRadius * referenceRadius;
 
             // The group's combined look
             Color color = default;
@@ -540,9 +660,9 @@ namespace SFS.Parts.Modules
 
             for (int k = from; k < to; k++)
             {
-                Flame flame = flames[cluster[k]];
+                Flame flame = flames[run[k]];
                 FlameMeshModule module = flame.module;
-                float share = flame.radius * flame.throttle * GetLuminosity(flame);
+                float share = flame.radius * flame.presence * flame.throttle * GetLuminosity(flame);
 
                 color += module.FlameColor * share;
                 additiveBlend += module.appliedAdditiveBlend * share;
@@ -582,19 +702,20 @@ namespace SFS.Parts.Modules
 
             for (int k = from; k < to; k++)
             {
-                Flame flame = flames[cluster[k]];
+                Flame flame = flames[run[k]];
                 float halfWidth = GetHalfWidth(flame, settleDistance);
+                float axis = GetDrawnAxis(flame, settleDistance);
 
-                flame.settleLeft = flame.across - halfWidth;
-                flame.settleRight = flame.across + halfWidth;
-                flames[cluster[k]] = flame;
+                flame.settleLeft = axis - halfWidth;
+                flame.settleRight = axis + halfWidth;
+                flames[run[k]] = flame;
             }
 
             litBoundaries.Clear();
             litBoundaries.Add(0);
             for (int k = from + 1; k < to; k++)
             {
-                Flame left = flames[cluster[k - 1]], right = flames[cluster[k]];
+                Flame left = flames[run[k - 1]], right = flames[run[k]];
                 float unlit = (boundaries[k - from] - envelopeLeft) / span;
 
                 // -1 = only the left flame gives off any light .. 1 = only the right one
@@ -604,7 +725,12 @@ namespace SFS.Parts.Modules
                 float reach = ((dominance > 0 ? right.settleLeft : left.settleRight) - envelopeLeft) / span;
                 reach = dominance > 0 ? Mathf.Clamp(reach, 0, unlit) : Mathf.Clamp(reach, unlit, 1);
 
-                litBoundaries.Add(Mathf.Lerp(unlit, reach, Mathf.Abs(dominance)));
+                float lit = Mathf.Lerp(unlit, reach, Mathf.Abs(dominance));
+
+                // A barely present jet is spread over right across its slice
+                float dimmer = GetDimmer(left, right);
+                float across = (boundaries[k - from + (dimmer > 0 ? -1 : 1)] - envelopeLeft) / span;
+                litBoundaries.Add(Mathf.Lerp(lit, across, Mathf.Abs(dimmer)));
             }
             litBoundaries.Add(1);
 
@@ -618,40 +744,40 @@ namespace SFS.Parts.Modules
             // Streaks have to be told how many jet-widths wide that envelope is
             float ownWidths = 0;
             for (int k = from; k < to; k++)
-                ownWidths += flames[cluster[k]].edgeRight - flames[cluster[k]].edgeLeft;
-            float stripeScale = span * (to - from) / Mathf.Max(ownWidths, 1e-4f);
+                ownWidths += (flames[run[k]].edgeRight - flames[run[k]].edgeLeft) * flames[run[k]].part;
+            float stripeScale = span * parts / Mathf.Max(ownWidths, 1e-4f);
 
             // Where each pair splits at the nozzles, before the plumes spread
             nozzleSplits.Clear();
             nozzleSplits.Add(-FarAway); // the outermost edges have no neighbour to split from
             for (int k = from + 1; k < to; k++)
             {
-                Flame left = flames[cluster[k - 1]], right = flames[cluster[k]];
+                Flame left = flames[run[k - 1]], right = flames[run[k]];
                 nozzleSplits.Add((left.across * right.radius + right.across * left.radius) / (left.radius + right.radius));
             }
             nozzleSplits.Add(FarAway);
 
             float lead = 0;
             for (int k = from; k < to; k++)
-                lead += mergeDistance - flames[cluster[k]].along;
-            lead /= to - from;
+                lead += (mergeDistance - flames[run[k]].along) * flames[run[k]].part;
+            lead /= parts;
 
             int smokeLeader = -1;
             float smokeWeight = 0;
             for (int k = from; k < to; k++)
             {
-                Flame flame = flames[cluster[k]];
+                Flame flame = flames[run[k]];
                 if (flame.module.smokeTrail == null)
                     continue;
 
                 if (smokeLeader < 0)
                     smokeLeader = k;
-                smokeWeight += flame.radius;
+                smokeWeight += flame.radius * flame.part;
             }
 
             for (int k = from; k < to; k++)
             {
-                Flame flame = flames[cluster[k]];
+                Flame flame = flames[run[k]];
                 float sliceStart = (boundaries[k - from] - envelopeLeft) / span;
                 float sliceEnd = (boundaries[k - from + 1] - envelopeLeft) / span;
                 float litStart = litBoundaries[k - from];
@@ -659,23 +785,28 @@ namespace SFS.Parts.Modules
                 bool mirrored = flame.acrossScale < 0;
                 float splitStart = ToLocalAcross(nozzleSplits[k - from], flame);
                 float splitEnd = ToLocalAcross(nozzleSplits[k - from + 1], flame);
-                FlameNeighbour before = k > from ? GetNeighbour(flame, flames[cluster[k - 1]]) : default;
-                FlameNeighbour after = k + 1 < to ? GetNeighbour(flame, flames[cluster[k + 1]]) : default;
+                float closeBefore = k > from ? GetJoinCloseLength(k - 1, groupLength) / flame.alongScale : 0;
+                float closeAfter = k + 1 < to ? GetJoinCloseLength(k, groupLength) / flame.alongScale : 0;
+                FlameNeighbour before = k > from ? GetNeighbour(flame, flames[run[k - 1]]) : default;
+                FlameNeighbour after = k + 1 < to ? GetNeighbour(flame, flames[run[k + 1]]) : default;
 
                 flame.module.merge = new FlameMerge
                 {
-                    amount = 1,
-                    fadeLength = FadeLength * groupLength / flame.alongScale,
+                    amount = flame.presence * Mathf.Min(1, presence - flame.presence),
+                    // A jet throttled well below the group's takes the merged look sooner
+                    fadeLength = Mathf.Lerp(FadeLength, ShareFadeLength, Mathf.Clamp01(1 - flame.throttle / Mathf.Max(throttle, 1e-6f))) * groupLength / flame.alongScale,
                     share = mirrored ? new Vector2(1 - sliceEnd, 1 - sliceStart) : new Vector2(sliceStart, sliceEnd),
                     litShare = mirrored ? new Vector2(1 - litEnd, 1 - litStart) : new Vector2(litStart, litEnd),
                     shareFadeLength = ShareFadeLength * groupLength / flame.alongScale,
                     nozzleBounds = mirrored ? new Vector2(splitEnd, splitStart) : new Vector2(splitStart, splitEnd),
                     drift = flame.drift,
+                    bend = flame.bend / flame.alongScale,
+                    closeLength = mirrored ? new Vector2(closeAfter, closeBefore) : new Vector2(closeBefore, closeAfter),
                     stripeScale = stripeScale,
                     center = (centre - flame.across) / flame.acrossScale,
                     halfSpan = span * 0.5f / Mathf.Abs(flame.acrossScale),
                     throat = weight / Mathf.Abs(flame.acrossScale),
-                    nozzleRadius = weight / (to - from) / Mathf.Abs(flame.acrossScale),
+                    nozzleRadius = weight / parts / Mathf.Abs(flame.acrossScale),
                     leadsSmoke = k == smokeLeader,
                     smokeNozzles = smokeWeight / flame.radius,
                     groupLength = groupLength / flame.alongScale,
@@ -688,7 +819,7 @@ namespace SFS.Parts.Modules
                     stripesStrength = stripesStrength,
                     turbulence = turbulence,
                     mirror = mirrored ? -1 : 1,
-                    seed = flames[cluster[from]].module.noiseSeed,
+                    seed = flames[run[from]].module.noiseSeed,
                     eddyFlow = eddySpeed / groupLength,
                     lead = lead / flame.alongScale,
                     refLength = referenceLength / flame.alongScale,
@@ -696,6 +827,29 @@ namespace SFS.Parts.Modules
                     right = mirrored ? before : after,
                 };
             }
+        }
+
+        // 1 = only the right one takes part .. -1 = only the left
+        static float GetDimmer(Flame left, Flame right) => right.presence - left.presence;
+
+        static float GetJoinCloseLength(int k, float groupLength)
+        {
+            Flame left = flames[run[k]], right = flames[run[k + 1]];
+            float close = GetCloseLength(left, right, groupLength);
+            float dimmer = GetDimmer(left, right);
+            if (dimmer > 0 && k > 0)
+                close = Mathf.Lerp(close, GetCloseLength(flames[run[k - 1]], right, groupLength), dimmer);
+            else if (dimmer < 0 && k + 2 < run.Count)
+                close = Mathf.Lerp(close, GetCloseLength(left, flames[run[k + 2]], groupLength), -dimmer);
+            return close;
+        }
+
+        // how far past the merge plane a join's gap closes, in craft units
+        static float GetCloseLength(Flame left, Flame right, float groupLength)
+        {
+            float gap = right.edgeLeft - left.edgeRight;
+            float spread = EntrainSpread * Mathf.Max(Mathf.SmoothStep(0, 1, Mathf.Min(left.atmospherePressure, right.atmospherePressure) / EntrainThinAir), 0.25f);
+            return gap > 0 ? Mathf.Min(gap / (2 * spread), groupLength * 0.5f) : 0;
         }
 
         // Another jet of the group, in this flame's space
@@ -710,6 +864,8 @@ namespace SFS.Parts.Modules
                 present = true,
                 origin = new Vector2(ToLocalAcross(other.across + travel * (flame.along - other.along), flame), (other.along - flame.along) / flame.alongScale),
                 slope = (travel - ownTravel) * flame.alongScale / flame.acrossScale,
+                drift = travel * flame.alongScale / flame.acrossScale,
+                bend = other.bend / flame.alongScale,
                 scale = new Vector2(other.acrossScale / flame.acrossScale, other.alongScale / flame.alongScale),
                 exitPressure = other.exitPressure,
                 throttle = other.throttle,
@@ -767,6 +923,9 @@ namespace SFS.Parts.Modules
             public float acrossScale;
             public float alongScale;
             public float drift;
+            public float bend;
+            public float presence; // 0..1, how far it takes part in the group
+            public float part; // its share of the group's nozzle
             public float edgeLeft;
             public float edgeRight;
             public float settleLeft;

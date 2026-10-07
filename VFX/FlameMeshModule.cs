@@ -22,12 +22,15 @@ namespace SFS.Parts.Modules
             MergeShareFadeLength = Shader.PropertyToID("mergeShareFadeLength"),
             MergeNozzleBounds = Shader.PropertyToID("mergeNozzleBounds"),
             MergeDrift = Shader.PropertyToID("mergeDrift"),
+            MergeBend = Shader.PropertyToID("mergeBend"),
+            MergeCloseLength = Shader.PropertyToID("mergeCloseLength"),
             MergeStripeScale = Shader.PropertyToID("mergeStripeScale"),
             MergeRowStep = Shader.PropertyToID("mergeRowStep"),
             MergeLead = Shader.PropertyToID("mergeLead"),
             MergeRefLength = Shader.PropertyToID("mergeRefLength"),
             NeighbourFrame = Shader.PropertyToID("neighbourFrame"),
             NeighbourFlow = Shader.PropertyToID("neighbourFlow"),
+            NeighbourBend = Shader.PropertyToID("neighbourBend"),
             MergeCenter = Shader.PropertyToID("mergeCenter"),
             MergeHalfSpan = Shader.PropertyToID("mergeHalfSpan"),
             MergeThroat = Shader.PropertyToID("mergeThroat"),
@@ -95,6 +98,7 @@ namespace SFS.Parts.Modules
         static readonly Vector4[] glareFlow = new Vector4[FlameMergeSolver.MaxGlareSources];
         static readonly Vector4[] neighbourFrame = new Vector4[2];
         static readonly Vector4[] neighbourFlow = new Vector4[2];
+        static readonly Vector4[] neighbourBend = new Vector4[2];
 
         // The shader reads diamondOffset off the material, and it shifts the envelope enough to move
         // where two plumes touch - so the solver has to take it from the same place.
@@ -301,6 +305,8 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(MergeShareFadeLength, meshMerge.shareFadeLength);
                 propertyBlock.SetVector(MergeNozzleBounds, meshMerge.nozzleBounds);
                 propertyBlock.SetFloat(MergeDrift, meshMerge.drift);
+                propertyBlock.SetFloat(MergeBend, meshMerge.bend);
+                propertyBlock.SetVector(MergeCloseLength, meshMerge.closeLength);
                 propertyBlock.SetFloat(MergeStripeScale, meshMerge.stripeScale);
                 propertyBlock.SetFloat(MergeRowStep, GetRowStep(GetMesh(a)));
                 propertyBlock.SetFloat(MergeLead, meshMerge.lead);
@@ -309,6 +315,7 @@ namespace SFS.Parts.Modules
                 SetNeighbour(1, meshMerge.right, throttle);
                 propertyBlock.SetVectorArray(NeighbourFrame, neighbourFrame);
                 propertyBlock.SetVectorArray(NeighbourFlow, neighbourFlow);
+                propertyBlock.SetVectorArray(NeighbourBend, neighbourBend);
                 propertyBlock.SetFloat(MergeCenter, meshMerge.center);
                 propertyBlock.SetFloat(MergeHalfSpan, meshMerge.halfSpan);
                 propertyBlock.SetFloat(MergeThroat, meshMerge.throat);
@@ -344,6 +351,7 @@ namespace SFS.Parts.Modules
         {
             neighbourFrame[i] = n.present ? new Vector4(n.origin.x, n.origin.y, n.scale.x, n.scale.y) : new Vector4(0, 0, 1, 1);
             neighbourFlow[i] = n.present ? new Vector4(n.slope, n.exitPressure, n.throttle, 1) : new Vector4(0, exitPressure, throttle, 0);
+            neighbourBend[i] = n.present ? new Vector4(n.drift, n.bend) : Vector4.zero;
         }
 
         public float GetGlowVisibility()
@@ -369,9 +377,27 @@ namespace SFS.Parts.Modules
             return visibility / samples;
         }
 
-        // How far down the mesh (0 at the nozzle, 1 at its far end) the drawn plume has faded out, as the shader shortens it with throttle
-        // How far down the mesh (0 at the nozzle, 1 at its far end) the plume has faded out, as the shader shortens it with throttle: this jet, or the group's merged plume
-        public float GetFadedOutMeshY(bool group) => Mathf.Lerp(0.01f, 1, group && merge.amount > 0 ? merge.throttle : appliedThrottle);
+        // The tail the plume breaks up into in air (plumeTail etc. in the shader)
+        const float PlumeTail = 0.6f, TailStart = 0.55f, TailThinStart = 0.35f;
+        const float TailSeaChurn = 1.7f, TailThinChurn = 2.5f, TailThinAir = 0.01f;
+        const float TailContrast = 0.5f;
+        static readonly float[] PuffQuartiles = { -1.15f, -0.32f, 0.32f, 1.15f };
+
+        static float GetTailPresence(float atmospherePressure) => Mathf.SmoothStep(0, 1, atmospherePressure / TailThinAir);
+
+        // how much further the tail carries the plume, of its drawn length
+        static float GetTail(float atmospherePressure) => PlumeTail * GetTailPresence(atmospherePressure);
+
+        static float GetTailStart(float atmospherePressure) => Mathf.Lerp(TailThinStart, TailStart, Mathf.Sqrt(Mathf.Clamp01(atmospherePressure)));
+
+        static float GetTailChurn(float atmospherePressure)
+            => Mathf.Lerp(TailThinChurn, TailSeaChurn, Mathf.Sqrt(Mathf.Clamp01(atmospherePressure))) * GetTailPresence(atmospherePressure);
+
+        // meshY the plume would fade out at without its tail
+        float GetFadeEnd(bool group) => Mathf.Lerp(0.01f, 1, group && merge.amount > 0 ? merge.throttle : appliedThrottle);
+
+        // meshY it has faded out at, tail included
+        public float GetFadedOutMeshY(bool group) => GetFadeEnd(group) * (1 + GetTail(appliedAtmospherePressure));
 
         // The plume at meshY in world space - this jet, or the group's merged plume - as its middle, half-width, and how far down it that is
         public void GetCrossSection(float meshY, bool group, out Vector2 centre, out float halfWidth, out float distance)
@@ -403,8 +429,24 @@ namespace SFS.Parts.Modules
             GetPlumeSpace(out FlameMerge meshMerge);
             PlumeSample sample = SamplePlume(meshY, meshMerge, group);
 
-            float lengthFade = Mathf.Clamp01(1 - meshY / GetFadedOutMeshY(group));
-            return Mathf.Pow(Mathf.Max(sample.widthRatio, 1e-4f), -1.6f) * lengthFade * GetMaskAlong(meshY);
+            float end = GetFadeEnd(group);
+            float tail = GetTail(appliedAtmospherePressure);
+            float start = GetTailStart(appliedAtmospherePressure);
+            float churn = GetTailChurn(appliedAtmospherePressure);
+            float t = meshY / Mathf.Max(end, 1e-4f);
+            float tailY = (t > start ? start + (t - start) * (1 - start) / (1 + tail - start) : t) * end;
+            float mask = GetMaskAlong(tailY);
+
+            // The tail's puffs, averaged over the eddies
+            float alongTail = Mathf.Clamp01((t - start) / (1 + tail - start));
+            float bias = 1.5f - 3.5f * alongTail - 1.5f * (1 - mask);
+            float puffs = 0;
+            foreach (float eddy in PuffQuartiles)
+                puffs += Mathf.Clamp01(0.5f + (eddy + bias) * TailContrast * Mathf.Max(churn, 1)) / PuffQuartiles.Length;
+            float breakup = Mathf.Lerp(1, puffs, Mathf.SmoothStep(0, 1, alongTail / 0.35f) * Mathf.Clamp01(churn));
+
+            float lengthFade = Mathf.Clamp01(1 - tailY / end);
+            return Mathf.Pow(Mathf.Max(sample.widthRatio, 1e-4f), -1.6f) * lengthFade * mask * breakup;
         }
 
         // How far into the merge with its neighbours this flame is at meshY: 0 its own jet .. 1 wholly the group's plume, as the shader crossfades them
@@ -457,7 +499,7 @@ namespace SFS.Parts.Modules
             PlumeSample sample;
             sample.along = meshY * (ownLength + (mergedLength - ownLength) * meshY);
             float ownWidth = GetFlameWidth(Mathf.Clamp01(sample.along / ownLength), exitPressure, appliedThrottle, appliedAtmospherePressure, DiamondOffset);
-            sample.centre = 0;
+            sample.centre = merging ? GetJetAxis(sample.along, m) : 0;
             sample.halfWidth = sample.widthRatio = ownWidth;
             if (!merging || !group)
                 return sample;
@@ -595,11 +637,18 @@ namespace SFS.Parts.Modules
             bool takesShare = merge.amount > 0 && !machDiamondsMesh;
 
             float mergedLength = takesShare ? Mathf.Max(merge.alongOffset + merge.groupLength, ownLength) : ownLength;
-            along = meshY * (ownLength + (mergedLength - ownLength) * meshY);
+            float drawnLength = mergedLength;
+            if (!machDiamondsMesh)
+            {
+                float reach = 1 + GetTail(atmospherePressure) + 0.1f;
+                drawnLength = reach * (ownLength + (mergedLength - ownLength) * reach);
+            }
+            along = meshY * (ownLength + (drawnLength - ownLength) * meshY);
 
             float ownWidth = GetFlameWidth(Mathf.Clamp01(along / ownLength), exitPressure, throttle, atmospherePressure, DiamondOffset);
-            left = -ownWidth;
-            right = ownWidth;
+            float jetAxis = GetJetAxis(along, merge);
+            left = jetAxis - ownWidth;
+            right = jetAxis + ownWidth;
 
             if (!takesShare)
                 return;
@@ -669,7 +718,18 @@ namespace SFS.Parts.Modules
                 return -side * float.MaxValue;
 
             float width = GetFlameWidth(Mathf.Clamp01(alongN / GetPlumeLength(n.exitPressure)), n.exitPressure, n.throttle, atmospherePressure, DiamondOffset);
-            return n.origin.x + n.slope * along + side * width * Mathf.Abs(n.scale.x);
+            float bent = along - n.origin.y;
+            return n.origin.x + n.slope * along + n.drift * (GetBent(bent, n.bend) - bent) + side * width * Mathf.Abs(n.scale.x);
+        }
+
+        // GetJetAxis in the shader
+        static float GetJetAxis(float along, FlameMerge merge) => merge.amount > 0 ? merge.drift * (GetBent(along, merge.bend) - Mathf.Max(along, 0)) : 0;
+
+        // GetBent in the shader
+        static float GetBent(float along, float bend)
+        {
+            along = Mathf.Max(along, 0);
+            return bend <= 0 ? along : along < bend ? along - along * along / (2 * bend) : bend / 2;
         }
 
         // coverMargin and joinFeather in the flame shader
@@ -681,7 +741,8 @@ namespace SFS.Parts.Modules
         static float GetDiamondsStrength(float flamePressure, float ambientPressure)
             => Mathf.Clamp01(Mathf.Max(ambientPressure - flamePressure, 0f) * 2f);
 
-        public static float GetFlameWidth(float y, float exitPressure, float throttle, float atmospherePressure, float diamondOffset)
+        // Mirrors the shader; without the ripple it is the smooth envelope
+        public static float GetFlameWidth(float y, float exitPressure, float throttle, float atmospherePressure, float diamondOffset, bool ripple = true)
         {
             const float gamma = 1.2f;
             const int diamondCount = 5;
@@ -692,9 +753,12 @@ namespace SFS.Parts.Modules
             float width = 0f;
 
             // Mach diamonds
-            float diamonds = Mathf.Abs(Mathf.Sin((y * diamondCount - diamondOffset) * Mathf.PI))
-                             - Mathf.Abs(Mathf.Sin(-diamondOffset * Mathf.PI));
-            width += diamonds * GetDiamondsStrength(flamePressure, ambientPressure) * 0.3f;
+            if (ripple)
+            {
+                float diamonds = Mathf.Abs(Mathf.Sin((y * diamondCount - diamondOffset) * Mathf.PI))
+                                 - Mathf.Abs(Mathf.Sin(-diamondOffset * Mathf.PI));
+                width += diamonds * GetDiamondsStrength(flamePressure, ambientPressure) * 0.3f;
+            }
 
             // Standard expansion
             width += y * 0.5f;

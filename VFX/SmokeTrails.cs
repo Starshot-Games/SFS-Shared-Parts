@@ -25,7 +25,7 @@ namespace SFS.Parts.Modules
 
         static readonly Dictionary<Material, SmokeTrails> renderers = new();
 
-        public static SmokeTrail StartTrail(Material material, Planet planet)
+        public static SmokeTrail StartTrail(Material material, Planet planet, float side, float spreadPhase)
         {
             if (!renderers.TryGetValue(material, out SmokeTrails renderer) || renderer == null)
             {
@@ -40,7 +40,7 @@ namespace SFS.Parts.Modules
                 renderer.trails.RemoveAt(0);
             }
 
-            SmokeTrail trail = new(planet);
+            SmokeTrail trail = new(planet, side, spreadPhase);
             renderer.trails.Add(trail);
             return trail;
         }
@@ -367,6 +367,7 @@ namespace SFS.Parts.Modules
             public float lifetime;
             public float mass;       // smoke between it and the next older point, as optical depth · m²
             public float side;       // which way it runs off along the ground
+            public float spread; // of the speed it hit the ground with
             public float random;
             public bool held;        // still in the flame, which carries it on down itself until it lets go where the flame ends
             public float along;      // m down the flame from the nozzle, while held
@@ -394,8 +395,13 @@ namespace SFS.Parts.Modules
         const int MaxPoints = 2000;
         const float MergeDistance = 0.7f; // of the radius
         const float MinSpeed = 0.5f; // m/s, below which a point settles
+        const float MinSpread = -0.05f, MaxSpread = 1.1f; // run-off speed, of the speed it hit the ground with
+        const float SpreadPeriod = 2; // s per sweep from fastest to slowest
+        const float GroundLift = 1.06f; // how much of that speed bounces it back up
 
         public readonly Planet planet;
+        public readonly float side; // which way along the ground its smoke runs
+        public readonly float spreadPhase; // where in the spread sweep it is at time 0
         public readonly List<Point> points = new();
         public Point head;
         public Color32 color;
@@ -408,9 +414,13 @@ namespace SFS.Parts.Modules
 
         double lastFeed = double.NaN, lastEmit;
         float pendingMass;
-        float side = 1;
 
-        public SmokeTrail(Planet planet) => this.planet = planet;
+        public SmokeTrail(Planet planet, float side, float spreadPhase)
+        {
+            this.planet = planet;
+            this.side = side;
+            this.spreadPhase = spreadPhase;
+        }
 
         // Moves the head to where the smoke shows up in the flame, and every so often leaves a point there for the flame to carry on
         public void Feed(Double2 position, Vector2 velocity, float radius, float along, float swell, float expansion, float drag, float lifetime, float hidden, float massRate, double now)
@@ -433,6 +443,7 @@ namespace SFS.Parts.Modules
                 lifetime = Mathf.Max(lifetime, 0.01f),
                 mass = pendingMass,
                 side = side,
+                spread = GetSpread(now),
                 random = Random.value,
                 carried = points.Count > 0 ? points[^1].carried : Double2.zero, // picks up where its neighbour's texture is, unstretched
                 held = true,
@@ -442,6 +453,12 @@ namespace SFS.Parts.Modules
 
             if (points.Count == 0 || now - lastEmit >= EmitInterval)
                 Emit(now);
+        }
+
+        float GetSpread(double now)
+        {
+            double sweep = now / SpreadPeriod + spreadPhase;
+            return Mathf.Lerp(MaxSpread, MinSpread, (float)(sweep - System.Math.Floor(sweep)));
         }
 
         public void End()
@@ -472,7 +489,6 @@ namespace SFS.Parts.Modules
             points.Add(head);
             head.mass = pendingMass = 0;
             lastEmit = now;
-            side = -side;
         }
 
         // Carries the smoke that's been let go on through the air, one physics step
@@ -550,11 +566,7 @@ namespace SFS.Parts.Modules
             Vector2 normal = up;
             float into = Vector2.Dot(point.velocity, normal);
             if (into < 0)
-            {
-                float lift = 1 + 0.12f * (point.random * 7.31f % 1);
-                float sideways = point.side * Mathf.Lerp(0.3f, 1, point.random);
-                point.velocity += normal * (-into * lift) + new Vector2(normal.y, -normal.x) * (-into * sideways);
-            }
+                point.velocity += normal * (-into * GroundLift) + new Vector2(normal.y, -normal.x) * (-into * point.side * point.spread);
         }
     }
 }
