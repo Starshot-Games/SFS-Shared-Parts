@@ -14,6 +14,8 @@ namespace SFS.Parts.Modules
         static readonly int NoiseOrigin = Shader.PropertyToID("_NoiseOrigin");
         static readonly int NoiseScale = Shader.PropertyToID("_NoiseScale");
         static readonly int DetailScale = Shader.PropertyToID("_DetailScale");
+        static readonly int Accumulated = Shader.PropertyToID("_SmokeAccumulated");
+        const int AccumulatePass = 1; // of the trail shader; pass 0 draws straight onto the screen
 
         const float MinDepth = 0.002f; // segments fainter than this are left out
         const float QuadWidth = 1.5f;  // of the radius, leaving room for the shader's ragged edges
@@ -89,9 +91,23 @@ namespace SFS.Parts.Modules
 
             mesh = new Mesh { name = "Smoke Trails" };
             mesh.MarkDynamic();
-            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            propertyBlock = new MaterialPropertyBlock();
 
-            meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            // The compositor draws the mesh itself; without it the trails go straight onto the screen from here
+            if (Compositor.Available)
+                Compositor.Add(this);
+            else
+            {
+                gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                meshRenderer = SetupRenderer(gameObject, material);
+            }
+
+            WorldView.main.positionOffset.OnChange += Position;
+        }
+
+        static MeshRenderer SetupRenderer(GameObject gameObject, Material material)
+        {
+            MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
             meshRenderer.sharedMaterial = material;
             meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
             meshRenderer.receiveShadows = false;
@@ -100,9 +116,7 @@ namespace SFS.Parts.Modules
             meshRenderer.sortingLayerName = "Default";
             meshRenderer.sortingOrder = 5; // over parts and flames, under terrain, reentry heat and engine glows
             meshRenderer.enabled = false;
-
-            propertyBlock = new MaterialPropertyBlock();
-            WorldView.main.positionOffset.OnChange += Position;
+            return meshRenderer;
         }
 
         void OnDestroy()
@@ -110,8 +124,116 @@ namespace SFS.Parts.Modules
             if (WorldView.main != null)
                 WorldView.main.positionOffset.OnChange -= Position;
 
+            Compositor.Remove(this);
             ClearTrails();
             Destroy(mesh);
+        }
+
+        bool HasSmoke => mesh != null && mesh.vertexCount > 0;
+        
+        static class Compositor
+        {
+            static readonly List<SmokeTrails> renderers = new();
+            static CommandBuffer buffer;
+            static Camera attached;
+            static MeshRenderer quad;
+            static Material material;
+            static Texture2D none;
+            static bool? available;
+
+            public static bool Available
+            {
+                get
+                {
+                    available ??= SystemInfo.SupportsBlendingOnRenderTextureFormat(RenderTextureFormat.ARGBHalf) && UnityEngine.Resources.Load<Shader>("Effects/SmokeComposite") != null;
+                    return available.Value;
+                }
+            }
+
+            public static void Add(SmokeTrails renderer)
+            {
+                if (buffer == null)
+                {
+                    buffer = new CommandBuffer { name = "Smoke Trails" };
+                    Camera.onPreRender += Prepare;
+                }
+
+                renderers.Add(renderer);
+            }
+
+            public static void Remove(SmokeTrails renderer) => renderers.Remove(renderer);
+
+            static MeshRenderer Quad
+            {
+                get
+                {
+                    if (quad != null)
+                        return quad;
+
+                    // Its corners are clip-space, and its bounds reach far enough that it's never culled
+                    Mesh mesh = new() { name = "Smoke Composite" };
+                    mesh.SetVertices(new[] { new Vector3(-1, -1), new Vector3(1, -1), new Vector3(1, 1), new Vector3(-1, 1) });
+                    mesh.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0, false);
+                    mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1e9f);
+
+                    GameObject gameObject = new("Smoke Composite");
+                    gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                    if (material == null)
+                        material = new Material(UnityEngine.Resources.Load<Shader>("Effects/SmokeComposite"));
+                    quad = SetupRenderer(gameObject, material);
+                    return quad;
+                }
+            }
+
+            static Texture2D None
+            {
+                get
+                {
+                    if (none != null)
+                        return none;
+                    none = new Texture2D(1, 1, TextureFormat.RGBAHalf, false);
+                    none.SetPixel(0, 0, Color.clear);
+                    none.Apply();
+                    return none;
+                }
+            }
+
+            // Refills the buffer for the camera about to draw the world, with the trails and the origin where they are now
+            static void Prepare(Camera camera)
+            {
+                Camera world = WorldView.main != null && WorldView.main.worldCamera != null ? WorldView.main.worldCamera.camera : null;
+                if (camera != world || world == null)
+                {
+                    Shader.SetGlobalTexture(Accumulated, None);
+                    return;
+                }
+
+                if (attached != camera)
+                {
+                    if (attached != null)
+                        attached.RemoveCommandBuffer(CameraEvent.BeforeForwardAlpha, buffer);
+                    camera.AddCommandBuffer(CameraEvent.BeforeForwardAlpha, buffer);
+                    attached = camera;
+                }
+
+                bool any = false;
+                foreach (SmokeTrails renderer in renderers)
+                    any |= renderer != null && renderer.HasSmoke;
+
+                buffer.Clear();
+                Quad.enabled = any;
+                if (!any)
+                    return;
+
+                buffer.GetTemporaryRT(Accumulated, -1, -1, 0, FilterMode.Point, RenderTextureFormat.ARGBHalf);
+                buffer.SetRenderTarget(Accumulated);
+                buffer.ClearRenderTarget(false, true, Color.clear);
+                foreach (SmokeTrails renderer in renderers)
+                    if (renderer != null && renderer.HasSmoke)
+                        buffer.DrawMesh(renderer.mesh, renderer.transform.localToWorldMatrix, renderer.material, 0, AccumulatePass, renderer.propertyBlock);
+                buffer.SetGlobalTexture(Accumulated, Accumulated);
+                buffer.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
+            }
         }
 
         void ClearTrails()
@@ -149,7 +271,8 @@ namespace SFS.Parts.Modules
             {
                 ClearTrails();
                 mesh.Clear();
-                meshRenderer.enabled = false;
+                if (meshRenderer != null)
+                    meshRenderer.enabled = false;
                 return;
             }
 
@@ -205,7 +328,8 @@ namespace SFS.Parts.Modules
             }
 
             mesh.Clear();
-            meshRenderer.enabled = vertices.Count > 0;
+            if (meshRenderer != null)
+                meshRenderer.enabled = vertices.Count > 0;
             if (vertices.Count == 0)
                 return;
 
@@ -225,7 +349,8 @@ namespace SFS.Parts.Modules
             propertyBlock.SetVector(NoiseOrigin, new Vector4(
                 Fraction(anchor.x / noiseScale), Fraction(anchor.y / noiseScale),
                 Fraction(anchor.x / detailScale), Fraction(anchor.y / detailScale)));
-            meshRenderer.SetPropertyBlock(propertyBlock);
+            if (meshRenderer != null)
+                meshRenderer.SetPropertyBlock(propertyBlock);
         }
 
         static float Fraction(double value) => (float)(value - System.Math.Floor(value));
