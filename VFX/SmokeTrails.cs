@@ -12,13 +12,17 @@ namespace SFS.Parts.Modules
     public class SmokeTrails : MonoBehaviour
     {
         static readonly int NoiseOrigin = Shader.PropertyToID("_NoiseOrigin");
-        static readonly int NoiseScale = Shader.PropertyToID("_NoiseScale");
-        static readonly int DetailScale = Shader.PropertyToID("_DetailScale");
+        static readonly int NoiseTileProperty = Shader.PropertyToID("_NoiseTile");
+        static readonly int PuffSize = Shader.PropertyToID("_PuffSize");
+        static readonly int Sun = Shader.PropertyToID("_Sun");
         static readonly int Accumulated = Shader.PropertyToID("_SmokeAccumulated");
         const int AccumulatePass = 1; // of the trail shader; pass 0 draws straight onto the screen
 
         const float MinDepth = 0.002f; // segments fainter than this are left out
         const float QuadWidth = 1.5f;  // of the radius, leaving room for the shader's ragged edges
+        const float ConeSlope = 0.8f;  // m the smoke can have spread out per m back from where it comes out, or more where its flame widens faster
+        const double NoiseTile = 8192; // m across the tile of the shader's largest puffs; smaller ones halve it, so its fractions serve them all
+        const float SunTurn = 25;      // ° the light comes from left of straight up
 
         // Hard limits, whatever is flying: past them the oldest smoke goes first
         const int MaxTrails = 256;
@@ -79,10 +83,10 @@ namespace SFS.Parts.Modules
         readonly List<Vector4> segments = new();
         readonly List<Vector4> shapes = new();
         readonly List<Vector4> smokes = new();
-        readonly List<Vector4> carriedA = new();
-        readonly List<Vector4> carriedB = new();
+        readonly List<Vector4> carried = new();
         readonly List<Vector4> speeds = new();
-        double noiseScale, detailScale;
+        readonly List<Vector2> cones = new();
+        float puffSize;
         readonly List<int> indices = new();
 
         void Setup(Material material)
@@ -309,15 +313,14 @@ namespace SFS.Parts.Modules
             segments.Clear();
             shapes.Clear();
             smokes.Clear();
-            carriedA.Clear();
-            carriedB.Clear();
+            carried.Clear();
             speeds.Clear();
+            cones.Clear();
             indices.Clear();
 
             anchor = WorldView.main.positionOffset.Value;
             transform.position = Vector3.zero;
-            noiseScale = Mathf.Max(material.GetFloat(NoiseScale), 1e-3f);
-            detailScale = Mathf.Max(material.GetFloat(DetailScale), 1e-3f);
+            puffSize = Mathf.Max(material.GetFloat(PuffSize), 1e-3f);
 
             Camera camera = WorldView.main.worldCamera != null ? WorldView.main.worldCamera.camera : null;
             if (camera != null && camera.isActiveAndEnabled && !WorldView.main.scaledSpace.Value)
@@ -339,16 +342,19 @@ namespace SFS.Parts.Modules
             mesh.SetUVs(0, segments);
             mesh.SetUVs(1, shapes);
             mesh.SetUVs(2, smokes);
-            mesh.SetUVs(3, carriedA);
-            mesh.SetUVs(4, carriedB);
+            mesh.SetUVs(3, carried);
             mesh.SetUVs(5, speeds);
+            mesh.SetUVs(6, cones);
             mesh.SetTriangles(indices, 0, false);
             mesh.RecalculateBounds();
 
             // The noise is laid in the air, so it's anchored to where this origin is in the world
-            propertyBlock.SetVector(NoiseOrigin, new Vector4(
-                Fraction(anchor.x / noiseScale), Fraction(anchor.y / noiseScale),
-                Fraction(anchor.x / detailScale), Fraction(anchor.y / detailScale)));
+            propertyBlock.SetVector(NoiseOrigin, new Vector4(Fraction(anchor.x / NoiseTile), Fraction(anchor.y / NoiseTile)));
+            propertyBlock.SetFloat(NoiseTileProperty, (float)NoiseTile);
+
+            // Lit from above wherever the view is around the planet
+            Vector2 up = anchor.sqrMagnitude > 0 ? (Vector2)(anchor / anchor.magnitude) : Vector2.up;
+            propertyBlock.SetVector(Sun, Quaternion.Euler(0, 0, SunTurn) * up);
             if (meshRenderer != null)
                 meshRenderer.SetPropertyBlock(propertyBlock);
         }
@@ -360,6 +366,19 @@ namespace SFS.Parts.Modules
         {
             double wholeX = System.Math.Floor(newer.x / tile), wholeY = System.Math.Floor(newer.y / tile);
             return new Vector4((float)(newer.x / tile - wholeX), (float)(newer.y / tile - wholeY), (float)(older.x / tile - wholeX), (float)(older.y / tile - wholeY));
+        }
+
+        // For smoke the ground has turned aside, how far the puffs it carried are squeezed or stretched along a segment: 0 within 1.4 times
+        // either way, 1 from twice, and only where that covers enough of a puff to show, a quarter of one
+        float GetDistortion(Node newer, Node older, Vector2 delta, float length)
+        {
+            if (!newer.grounded && !older.grounded)
+                return 0;
+
+            float texture = (delta - (Vector2)(older.carried - newer.carried)).magnitude;
+            float stretch = Mathf.Abs(Mathf.Log(Mathf.Max(texture, 1e-4f) / Mathf.Max(length, 1e-4f), 2));
+            float puff = puffSize * Mathf.Min(newer.radius, older.radius);
+            return Mathf.Clamp01(stretch * 2 - 1) * Mathf.Clamp01(Mathf.Max(texture, length) * 4 / Mathf.Max(puff, 1e-3f));
         }
 
         // The part of the z = 0 plane the camera sees, with a margin
@@ -388,19 +407,23 @@ namespace SFS.Parts.Modules
                 return;
 
             Node newer = new(trail.Emitting ? trail.head : points[last], anchor, now, trail.keepVisible);
+            float headRadius = newer.radius;
             float fromHead = 0;
+            float slope = Mathf.Max(ConeSlope, trail.widening);
+            Vector2 cone = new(1 / slope, headRadius);
             Vector2 direction = Vector2.down;
 
             for (int i = trail.Emitting ? last : last - 1; i >= 0; i--)
             {
                 Node older = new(points[i], anchor, now, trail.keepVisible);
-                fromHead += AddSegment(newer, older, fromHead, trail, view, ref direction);
+                older = older.Within(headRadius + (fromHead + Vector2.Distance(newer.position, older.position)) * slope);
+                fromHead += AddSegment(newer, older, fromHead, cone, trail, view, ref direction);
                 newer = older;
             }
         }
 
         // One quad per segment, reaching past both ends by the cap its smoke is spread over
-        float AddSegment(Node newer, Node older, float fromHead, SmokeTrail trail, Rect view, ref Vector2 direction)
+        float AddSegment(Node newer, Node older, float fromHead, Vector2 cone, SmokeTrail trail, Rect view, ref Vector2 direction)
         {
             Vector2 delta = older.position - newer.position;
             float length = delta.magnitude;
@@ -426,6 +449,7 @@ namespace SFS.Parts.Modules
 
             Vector2 across = new(-direction.y, direction.x);
             int start = vertices.Count;
+            float distortion = GetDistortion(newer, older, delta, length);
 
             for (int corner = 0; corner < 4; corner++)
             {
@@ -437,9 +461,9 @@ namespace SFS.Parts.Modules
                 segments.Add(new Vector4(t, y, fromHead + t, older.random));
                 shapes.Add(new Vector4(length, cap, newer.radius, older.radius));
                 smokes.Add(new Vector4(newer.mass, newer.fade, older.fade, trail.fadeIn));
-                carriedA.Add(GetCarried(newer.carried, older.carried, noiseScale));
-                carriedB.Add(GetCarried(newer.carried, older.carried, detailScale));
-                speeds.Add(new Vector2(newer.speed, older.speed));
+                carried.Add(GetCarried(newer.carried, older.carried, NoiseTile));
+                speeds.Add(new Vector4(newer.speed, older.speed, distortion));
+                cones.Add(cone);
             }
 
             indices.Add(start);
@@ -461,6 +485,7 @@ namespace SFS.Parts.Modules
             public readonly Double2 carried;
             public readonly float speed;
             public readonly float random;
+            public readonly bool grounded;
 
             public Node(in SmokeTrail.Point point, Double2 anchor, double now, float keepVisible)
             {
@@ -468,10 +493,20 @@ namespace SFS.Parts.Modules
                 carried = point.carried;
                 speed = point.velocity.magnitude;
                 random = point.random;
+                grounded = point.grounded;
                 radius = point.GetRadius(now);
                 fade = point.GetFade(now);
                 mass = point.mass * Mathf.Pow(radius / Mathf.Max(point.GetSwollenRadius(now), 1e-4f), keepVisible);
             }
+
+            Node(in Node node, float radius)
+            {
+                this = node;
+                this.radius = radius;
+            }
+
+            // The same smoke squeezed into no wider than maxRadius
+            public Node Within(float maxRadius) => radius > maxRadius ? new Node(this, maxRadius) : this;
         }
     }
 
@@ -487,6 +522,7 @@ namespace SFS.Parts.Modules
             public double time;      // world time it was let go
             public float radius;     // when let go
             public float swell;      // how much wider it puffs out just after
+            public float swellTime;  // s it takes to puff out about two thirds of that
             public float expansion;  // m its radius has grown by a minute on
             public float drag;       // 1/s its velocity through the air dies away at
             public float lifetime;
@@ -497,6 +533,7 @@ namespace SFS.Parts.Modules
             public bool held;        // still in the flame, which carries it on down itself until it lets go where the flame ends
             public float along;      // m down the flame from the nozzle, while held
             public float hidden;     // how much of it doesn't show yet when let go: in thin air it only shows as it puffs out
+            public bool grounded;    // the ground has turned it aside
 
             public float GetRadius(double now)
             {
@@ -505,18 +542,20 @@ namespace SFS.Parts.Modules
                 return GetSwollenRadius(now) + expansion * minutes * Mathf.Sqrt(minutes);
             }
 
-            public float GetSwollenRadius(double now) => radius * (1 + swell * (1 - Mathf.Exp(-Age(now) / SwellTime)));
+            public float GetSwollenRadius(double now) => radius * GetSwelling(now);
+
+            // How much wider it has puffed out than it was let go
+            public float GetSwelling(double now) => 1 + swell * (1 - Mathf.Exp(-Age(now) / swellTime));
 
             public float GetFade(double now)
             {
-                float shown = 1 - hidden * Mathf.Exp(-Age(now) / SwellTime);
+                float shown = 1 - hidden * Mathf.Exp(-Age(now) / swellTime);
                 return shown * (1 - Mathf.SmoothStep(0, 1, Mathf.InverseLerp(0.5f, 1, Age(now) / lifetime)));
             }
             float Age(double now) => Mathf.Max(0, (float)(now - time));
         }
 
         const float EmitInterval = 0.1f; // s
-        const float SwellTime = 1.2f; // s
         const int MaxPoints = 2000;
         const float MergeDistance = 0.7f; // of the radius
         const float MinSpeed = 0.5f; // m/s, below which a point settles
@@ -532,6 +571,7 @@ namespace SFS.Parts.Modules
         public Color32 color;
         public float fadeIn; // m the smoke takes to thicken in from its head
         public float keepVisible; // how much of its opacity the smoke keeps as it spreads, 0 thinning out with its width as mass would
+        public float widening; // m its flame widens per m back from the smoke's head, which the smoke may keep up with
 
         public bool Emitting { get; private set; } = true;
         public bool Removed { get; internal set; }
@@ -547,14 +587,16 @@ namespace SFS.Parts.Modules
             this.spreadPhase = spreadPhase;
         }
 
-        // Moves the head to where the smoke shows up in the flame, and every so often leaves a point there for the flame to carry on
-        public void Feed(Double2 position, Vector2 velocity, float radius, float along, float swell, float expansion, float drag, float lifetime, float hidden, float massRate, double now)
+        // Moves the head to where the smoke shows up in the flame, and every so often leaves a point there for the flame to carry on.
+        // A trail fed alongside a lead from the same flame wears the lead's texture, so where their smoke overlaps it shows one pattern.
+        public void Feed(Double2 position, Vector2 velocity, float radius, float along, float swell, float swellTime, float expansion, float drag, float lifetime, float hidden, float massRate, double now, SmokeTrail lead = null)
         {
             if (!IsFinite(position) || !float.IsFinite(velocity.x) || !float.IsFinite(velocity.y) || !float.IsFinite(radius) || !float.IsFinite(massRate))
                 return;
             if (!double.IsNaN(lastFeed))
                 pendingMass += massRate * Mathf.Max(0, (float)(now - lastFeed));
             lastFeed = now;
+            List<Point> textured = (lead ?? this).points;
 
             head = new Point
             {
@@ -563,6 +605,7 @@ namespace SFS.Parts.Modules
                 time = now,
                 radius = radius,
                 swell = swell,
+                swellTime = Mathf.Max(swellTime, 0.01f),
                 expansion = expansion,
                 drag = Mathf.Max(drag, 0.01f),
                 lifetime = Mathf.Max(lifetime, 0.01f),
@@ -570,7 +613,7 @@ namespace SFS.Parts.Modules
                 side = side,
                 spread = GetSpread(now),
                 random = Random.value,
-                carried = points.Count > 0 ? points[^1].carried : Double2.zero, // picks up where its neighbour's texture is, unstretched
+                carried = textured.Count > 0 ? textured[^1].carried : Double2.zero, // picks up where its neighbour's texture is, unstretched
                 held = true,
                 along = along,
                 hidden = Mathf.Clamp01(hidden),
@@ -687,6 +730,7 @@ namespace SFS.Parts.Modules
 
             Double2 up = point.position / radius;
             point.position = up * ground;
+            point.grounded = true;
 
             Vector2 normal = up;
             float into = Vector2.Dot(point.velocity, normal);

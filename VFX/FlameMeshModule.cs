@@ -16,9 +16,11 @@ namespace SFS.Parts.Modules
         // Plume merging - see FlameMergeSolver
         static readonly int
             MergeAmount = Shader.PropertyToID("mergeAmount"),
+            MergeContact = Shader.PropertyToID("mergeContact"),
             MergeFadeLength = Shader.PropertyToID("mergeFadeLength"),
             MergeShare = Shader.PropertyToID("mergeShare"),
             MergeLitShare = Shader.PropertyToID("mergeLitShare"),
+            MergeJoinWeight = Shader.PropertyToID("mergeJoinWeight"),
             MergeShareFadeLength = Shader.PropertyToID("mergeShareFadeLength"),
             MergeNozzleBounds = Shader.PropertyToID("mergeNozzleBounds"),
             MergeDrift = Shader.PropertyToID("mergeDrift"),
@@ -31,6 +33,7 @@ namespace SFS.Parts.Modules
             NeighbourFrame = Shader.PropertyToID("neighbourFrame"),
             NeighbourFlow = Shader.PropertyToID("neighbourFlow"),
             NeighbourBend = Shader.PropertyToID("neighbourBend"),
+            NeighbourEddyOffset = Shader.PropertyToID("neighbourEddyOffset"),
             MergeCenter = Shader.PropertyToID("mergeCenter"),
             MergeHalfSpan = Shader.PropertyToID("mergeHalfSpan"),
             MergeThroat = Shader.PropertyToID("mergeThroat"),
@@ -38,10 +41,16 @@ namespace SFS.Parts.Modules
             MergeAlongOffset = Shader.PropertyToID("mergeAlongOffset"),
             MergeExitPressure = Shader.PropertyToID("mergeExitPressure"),
             MergeThrottle = Shader.PropertyToID("mergeThrottle"),
+            MergeAirSpread = Shader.PropertyToID("mergeAirSpread"),
+            NeighbourSpread = Shader.PropertyToID("neighbourSpread"),
+            AirSpreadProperty = Shader.PropertyToID("airSpread"),
+            SmokeCoverProperty = Shader.PropertyToID("smokeCover"),
             MergeColor = Shader.PropertyToID("mergeColor"),
             MergeAdditiveBlend = Shader.PropertyToID("mergeAdditiveBlend"),
             MergeStripesWidth = Shader.PropertyToID("mergeStripesWidth"),
             MergeStripesStrength = Shader.PropertyToID("mergeStripesStrength"),
+            MergeSoot = Shader.PropertyToID("mergeSoot"),
+            NeighbourSoot = Shader.PropertyToID("neighbourSoot"),
             MergeTurbulence = Shader.PropertyToID("mergeTurbulence"),
             MergeMirror = Shader.PropertyToID("mergeMirror"),
             MergeSeed = Shader.PropertyToID("mergeSeed"),
@@ -51,6 +60,7 @@ namespace SFS.Parts.Modules
             EddyFlicker = Shader.PropertyToID("eddyFlicker"),
             TurbulenceProperty = Shader.PropertyToID("_Turbulence"),
             RoughnessProperty = Shader.PropertyToID("_Roughness"),
+            SootProperty = Shader.PropertyToID("_Soot"),
             GlareAxis = Shader.PropertyToID("glareAxis"),
             GlareShape = Shader.PropertyToID("glareShape"),
             GlareFlow = Shader.PropertyToID("glareFlow"),
@@ -69,6 +79,8 @@ namespace SFS.Parts.Modules
 
         [Space]
         public float exitPressure = 0.5f; // nozzle-exit static pressure (bar)
+        [Tooltip("How far the jet keeps spreading in air as it mixes with it, on down its tail too: nozzle half-widths per plume length")]
+        [Min(0)] public float airSpread;
         [ReadOnly, ShowInInspector] float flameExitTemperature; // fraction of chamber temperature (1 = chamber)
 
         [Space]
@@ -87,6 +99,7 @@ namespace SFS.Parts.Modules
         [NonSerialized] public float appliedAdditiveBlend;
         [NonSerialized] public FlameMerge merge;
         [NonSerialized] public SmokeTrailModule smokeTrail; // set by the smoke module while it's on, so a merged group can pick one to send out its smoke
+        [NonSerialized] public Vector3 smokeCover; // meshY where the smoke over this flame starts to show, where it has, and how much it hides the flame there
         [NonSerialized] public FlameGlare[] glare = new FlameGlare[FlameMergeSolver.MaxGlareSources];
         [NonSerialized] public int glareCount;
         bool registered;
@@ -99,6 +112,7 @@ namespace SFS.Parts.Modules
         static readonly Vector4[] neighbourFrame = new Vector4[2];
         static readonly Vector4[] neighbourFlow = new Vector4[2];
         static readonly Vector4[] neighbourBend = new Vector4[2];
+        static readonly Vector4[] neighbourEddyOffset = new Vector4[2];
 
         // The shader reads diamondOffset off the material, and it shifts the envelope enough to move
         // where two plumes touch - so the solver has to take it from the same place.
@@ -149,6 +163,22 @@ namespace SFS.Parts.Modules
             }
         }
 
+        // And how dark the soot it streaks near the nozzle is
+        float? soot;
+        public float Soot
+        {
+            get
+            {
+                if (soot == null)
+                {
+                    Material material = GetPlumeMaterial(SootProperty);
+                    soot = material != null ? material.GetFloat(SootProperty) : 0;
+                }
+
+                return soot.Value;
+            }
+        }
+
         // Where in the turbulence pattern this flame sits, so engines side by side don't churn in step
         [NonSerialized] public float noiseSeed;
         void Awake() => noiseSeed = UnityEngine.Random.value;
@@ -173,6 +203,10 @@ namespace SFS.Parts.Modules
 
         static Vector4 GetEddyFlicker(double time) => new(Frac(time * FlickerWander), Frac(-time * FlickerRate));
         static float Frac(double value) => (float)(value - Math.Floor(value));
+
+        // Plume lengths a second its turbulence streams down the plume drawn in that space
+        float GetEddyFlow(Transform space) => EddySpeed * space.TransformVector(Vector3.right).magnitude / (GetPlumeLength(exitPressure) * Mathf.Max(space.TransformVector(Vector3.up).magnitude, 1e-6f));
+        public float GetEddyFlow() => GetEddyFlow(GetPlumeSpace(out _));
 
         // The plume's own material (not the shock train's), provided it has the given property
         Material GetPlumeMaterial(int property)
@@ -276,6 +310,8 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(AdditiveBlend, additiveBlend);
                 
                 propertyBlock.SetFloat("exitPressure", exitPressure); // nozzle-exit static pressure (bar)
+                propertyBlock.SetFloat(AirSpreadProperty, airSpread);
+                propertyBlock.SetVector(SmokeCoverProperty, smokeCover);
 
                 propertyBlock.SetFloat("atmospherePressure", atmospherePressure); // 1 bar at ground -> 0 in vacuum, falling off exponentially with height
 
@@ -291,7 +327,7 @@ namespace SFS.Parts.Modules
 
                     glareAxis[i] = new Vector4(g.origin.x, g.origin.y, g.slope, g.depth);
                     glareShape[i] = new Vector4(g.halfSpan, g.throat, g.length);
-                    glareFlow[i] = new Vector4(g.exitPressure, g.throttle);
+                    glareFlow[i] = new Vector4(g.exitPressure, g.throttle, g.airSpread);
                 }
                 propertyBlock.SetVectorArray(GlareAxis, glareAxis);
                 propertyBlock.SetVectorArray(GlareShape, glareShape);
@@ -299,9 +335,11 @@ namespace SFS.Parts.Modules
 
                 // Merged plume (mergeAmount 0 = not merging, and the shader draws it as it always did)
                 propertyBlock.SetFloat(MergeAmount, meshMerge.amount);
+                propertyBlock.SetFloat(MergeContact, meshMerge.contact);
                 propertyBlock.SetFloat(MergeFadeLength, meshMerge.fadeLength);
                 propertyBlock.SetVector(MergeShare, meshMerge.share);
                 propertyBlock.SetVector(MergeLitShare, meshMerge.litShare);
+                propertyBlock.SetVector(MergeJoinWeight, meshMerge.joinWeight);
                 propertyBlock.SetFloat(MergeShareFadeLength, meshMerge.shareFadeLength);
                 propertyBlock.SetVector(MergeNozzleBounds, meshMerge.nozzleBounds);
                 propertyBlock.SetFloat(MergeDrift, meshMerge.drift);
@@ -316,6 +354,9 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetVectorArray(NeighbourFrame, neighbourFrame);
                 propertyBlock.SetVectorArray(NeighbourFlow, neighbourFlow);
                 propertyBlock.SetVectorArray(NeighbourBend, neighbourBend);
+                propertyBlock.SetVectorArray(NeighbourEddyOffset, neighbourEddyOffset);
+                propertyBlock.SetVector(NeighbourSpread, new Vector4(meshMerge.left.present ? meshMerge.left.airSpread : 0, meshMerge.right.present ? meshMerge.right.airSpread : 0));
+                propertyBlock.SetVector(NeighbourSoot, new Vector4(meshMerge.left.present ? meshMerge.left.soot : 0, meshMerge.right.present ? meshMerge.right.soot : 0));
                 propertyBlock.SetFloat(MergeCenter, meshMerge.center);
                 propertyBlock.SetFloat(MergeHalfSpan, meshMerge.halfSpan);
                 propertyBlock.SetFloat(MergeThroat, meshMerge.throat);
@@ -323,18 +364,18 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(MergeAlongOffset, meshMerge.alongOffset);
                 propertyBlock.SetFloat(MergeExitPressure, meshMerge.exitPressure);
                 propertyBlock.SetFloat(MergeThrottle, meshMerge.throttle);
+                propertyBlock.SetFloat(MergeAirSpread, meshMerge.airSpread);
                 propertyBlock.SetColor(MergeColor, meshMerge.color);
                 propertyBlock.SetFloat(MergeAdditiveBlend, meshMerge.additiveBlend);
                 propertyBlock.SetFloat(MergeStripesWidth, meshMerge.stripesWidth);
                 propertyBlock.SetFloat(MergeStripesStrength, meshMerge.stripesStrength);
+                propertyBlock.SetFloat(MergeSoot, meshMerge.soot);
                 propertyBlock.SetVector(MergeTurbulence, meshMerge.turbulence);
                 propertyBlock.SetFloat(MergeMirror, meshMerge.mirror);
                 propertyBlock.SetFloat(MergeSeed, meshMerge.seed);
                 propertyBlock.SetFloat(NoiseSeed, noiseSeed);
 
-                Transform space = a.meshRenderer.transform;
-                float flow = EddySpeed * space.TransformVector(Vector3.right).magnitude / (GetPlumeLength(exitPressure) * Mathf.Max(space.TransformVector(Vector3.up).magnitude, 1e-6f));
-                propertyBlock.SetVector(EddyOffset, GetEddyOffset(flow, Time.timeAsDouble));
+                propertyBlock.SetVector(EddyOffset, GetEddyOffset(GetEddyFlow(a.meshRenderer.transform), Time.timeAsDouble));
                 propertyBlock.SetVector(MergeEddyOffset, GetEddyOffset(meshMerge.eddyFlow, Time.timeAsDouble));
                 propertyBlock.SetVector(EddyFlicker, GetEddyFlicker(Time.timeAsDouble));
 
@@ -351,7 +392,8 @@ namespace SFS.Parts.Modules
         {
             neighbourFrame[i] = n.present ? new Vector4(n.origin.x, n.origin.y, n.scale.x, n.scale.y) : new Vector4(0, 0, 1, 1);
             neighbourFlow[i] = n.present ? new Vector4(n.slope, n.exitPressure, n.throttle, 1) : new Vector4(0, exitPressure, throttle, 0);
-            neighbourBend[i] = n.present ? new Vector4(n.drift, n.bend) : Vector4.zero;
+            neighbourBend[i] = n.present ? new Vector4(n.drift, n.bend, n.seed, n.amount) : Vector4.zero;
+            neighbourEddyOffset[i] = n.present ? GetEddyOffset(n.eddyFlow, Time.timeAsDouble) : Vector4.zero;
         }
 
         public float GetGlowVisibility()
@@ -415,7 +457,7 @@ namespace SFS.Parts.Modules
         {
             Transform space = GetPlumeSpace(out FlameMerge meshMerge);
             float ownLength = GetPlumeLength(exitPressure);
-            float extra = meshMerge.amount > 0 ? Mathf.Max(meshMerge.alongOffset + meshMerge.groupLength - ownLength, 0) : 0;
+            float extra = meshMerge.amount > 0 ? Mathf.Max(meshMerge.alongOffset + meshMerge.groupLength - ownLength, 0) * meshMerge.amount : 0;
             float along = Mathf.Max(distance, 0) / Mathf.Max(space.TransformVector(Vector3.up).magnitude, 1e-6f);
 
             // along = meshY · (ownLength + extra · meshY), solved for meshY
@@ -494,18 +536,18 @@ namespace SFS.Parts.Modules
         {
             float ownLength = GetPlumeLength(exitPressure);
             bool merging = m.amount > 0;
-            float mergedLength = merging ? Mathf.Max(m.alongOffset + m.groupLength, ownLength) : ownLength;
+            float mergedLength = merging ? Mathf.Lerp(ownLength, Mathf.Max(m.alongOffset + m.groupLength, ownLength), m.amount) : ownLength;
 
             PlumeSample sample;
             sample.along = meshY * (ownLength + (mergedLength - ownLength) * meshY);
-            float ownWidth = GetFlameWidth(Mathf.Clamp01(sample.along / ownLength), exitPressure, appliedThrottle, appliedAtmospherePressure, DiamondOffset);
+            float ownWidth = GetFlameWidth(sample.along / ownLength, exitPressure, appliedThrottle, airSpread, appliedAtmospherePressure, DiamondOffset);
             sample.centre = merging ? GetJetAxis(sample.along, m) : 0;
             sample.halfWidth = sample.widthRatio = ownWidth;
             if (!merging || !group)
                 return sample;
 
-            float groupT = Mathf.Clamp01((sample.along - m.alongOffset) / Mathf.Max(m.groupLength, 1e-4f));
-            float groupWidth = m.halfSpan + m.throat * (GetFlameWidth(groupT, m.exitPressure, m.throttle, appliedAtmospherePressure, DiamondOffset) - 1);
+            float groupT = (sample.along - m.alongOffset) / Mathf.Max(m.groupLength, 1e-4f);
+            float groupWidth = m.halfSpan + m.throat * (GetFlameWidth(groupT, m.exitPressure, m.throttle, m.airSpread, appliedAtmospherePressure, DiamondOffset) - 1);
 
             sample.centre = m.center - m.drift * sample.along;
             sample.halfWidth = groupWidth;
@@ -645,7 +687,7 @@ namespace SFS.Parts.Modules
             }
             along = meshY * (ownLength + (drawnLength - ownLength) * meshY);
 
-            float ownWidth = GetFlameWidth(Mathf.Clamp01(along / ownLength), exitPressure, throttle, atmospherePressure, DiamondOffset);
+            float ownWidth = GetFlameWidth(along / ownLength, exitPressure, throttle, airSpread, atmospherePressure, DiamondOffset);
             float jetAxis = GetJetAxis(along, merge);
             left = jetAxis - ownWidth;
             right = jetAxis + ownWidth;
@@ -655,8 +697,8 @@ namespace SFS.Parts.Modules
 
             float m = Mathf.SmoothStep(0, 1, Mathf.InverseLerp(merge.alongOffset, merge.alongOffset + merge.fadeLength, along)) * merge.amount;
 
-            float groupT = Mathf.Clamp01((along - merge.alongOffset) / Mathf.Max(merge.groupLength, 1e-4f));
-            float groupWidth = merge.halfSpan + merge.throat * (GetFlameWidth(groupT, merge.exitPressure, merge.throttle, atmospherePressure, DiamondOffset) - 1);
+            float groupT = (along - merge.alongOffset) / Mathf.Max(merge.groupLength, 1e-4f);
+            float groupWidth = merge.halfSpan + merge.throat * (GetFlameWidth(groupT, merge.exitPressure, merge.throttle, merge.airSpread, atmospherePressure, DiamondOffset) - 1);
 
             float mergeCentre = merge.center - merge.drift * along;
             float envelopeLeft = mergeCentre - groupWidth;
@@ -666,7 +708,7 @@ namespace SFS.Parts.Modules
             bool outerRight = merge.share.y >= 1 - 1e-4f;
 
             // The joins hold the places they have at the merge plane; only the outline goes with the envelope
-            Vector2 share = Vector2.Lerp(merge.share, merge.litShare, Mathf.SmoothStep(0, 1, Mathf.InverseLerp(merge.alongOffset, merge.alongOffset + Mathf.Max(merge.shareFadeLength, 1e-4f), along)));
+            Vector2 share = Vector2.Lerp(merge.share, merge.litShare, Mathf.SmoothStep(0, 1, Mathf.InverseLerp(merge.alongOffset, merge.alongOffset + Mathf.Max(merge.shareFadeLength, 1e-4f), along)) * merge.contact);
             float sliceLeft = outerLeft ? envelopeLeft : Mathf.Clamp(mergeCentre - merge.halfSpan + 2 * merge.halfSpan * share.x, envelopeLeft, envelopeRight);
             float sliceRight = outerRight ? envelopeRight : Mathf.Clamp(mergeCentre - merge.halfSpan + 2 * merge.halfSpan * share.y, envelopeLeft, envelopeRight);
 
@@ -682,18 +724,28 @@ namespace SFS.Parts.Modules
             bool joinLeft = !outerLeft && along >= startLeft;
             bool joinRight = !outerRight && along >= startRight;
 
-            left = outerLeft
-                ? Mathf.Lerp(left, sliceLeft, m)
-                : (!joinLeft ? left : (merged ? sliceLeft : Mathf.Lerp(nozzleBounds.x, planeLeft, approachLeft)));
-            right = outerRight
-                ? Mathf.Lerp(right, sliceRight, m)
-                : (!joinRight ? right : (merged ? sliceRight : Mathf.Lerp(nozzleBounds.y, planeRight, approachRight)));
+            Vector2 firm = new Vector2(joinLeft ? merge.joinWeight.x : 0, joinRight ? merge.joinWeight.y : 0);
+            Vector2 outline = new Vector2(Mathf.Lerp(left, envelopeLeft, m), Mathf.Lerp(right, envelopeRight, m));
+            Vector2 joins = new Vector2(
+                joinLeft ? (merged ? sliceLeft : Mathf.Lerp(nozzleBounds.x, planeLeft, approachLeft)) : outline.x,
+                joinRight ? (merged ? sliceRight : Mathf.Lerp(nozzleBounds.y, planeRight, approachRight)) : outline.y);
+            left = Mathf.Lerp(outline.x, joins.x, firm.x);
+            right = Mathf.Lerp(outline.y, joins.y, firm.y);
 
             // A covered outer slice closes up rather than inverting
-            if (outerLeft)
-                left = Mathf.Min(left, right);
-            if (outerRight)
-                right = Mathf.Max(right, left);
+            if (left > right)
+            {
+                if (firm.x <= firm.y)
+                    left = right;
+                else
+                    right = left;
+            }
+
+            // A loose join draws out to the outline too
+            if (joinLeft && firm.x < 1)
+                left = Mathf.Min(joins.x, outline.x);
+            if (joinRight && firm.y < 1)
+                right = Mathf.Max(joins.y, outline.y);
 
             // Away from its joins a slice also draws its neighbours' light, as far as it reaches (GetReach in the shader)
             if (!joinLeft)
@@ -717,13 +769,13 @@ namespace SFS.Parts.Modules
             if (!n.present || alongN < 0)
                 return -side * float.MaxValue;
 
-            float width = GetFlameWidth(Mathf.Clamp01(alongN / GetPlumeLength(n.exitPressure)), n.exitPressure, n.throttle, atmospherePressure, DiamondOffset);
+            float width = GetFlameWidth(alongN / GetPlumeLength(n.exitPressure), n.exitPressure, n.throttle, n.airSpread, atmospherePressure, DiamondOffset);
             float bent = along - n.origin.y;
-            return n.origin.x + n.slope * along + n.drift * (GetBent(bent, n.bend) - bent) + side * width * Mathf.Abs(n.scale.x);
+            return n.origin.x + n.slope * along + n.drift * n.amount * (GetBent(bent, n.bend) - bent) + side * width * Mathf.Abs(n.scale.x);
         }
 
         // GetJetAxis in the shader
-        static float GetJetAxis(float along, FlameMerge merge) => merge.amount > 0 ? merge.drift * (GetBent(along, merge.bend) - Mathf.Max(along, 0)) : 0;
+        static float GetJetAxis(float along, FlameMerge merge) => merge.amount > 0 ? merge.amount * merge.drift * (GetBent(along, merge.bend) - Mathf.Max(along, 0)) : 0;
 
         // GetBent in the shader
         static float GetBent(float along, float bend)
@@ -741,11 +793,14 @@ namespace SFS.Parts.Modules
         static float GetDiamondsStrength(float flamePressure, float ambientPressure)
             => Mathf.Clamp01(Mathf.Max(ambientPressure - flamePressure, 0f) * 2f);
 
-        // Mirrors the shader; without the ripple it is the smooth envelope
-        public static float GetFlameWidth(float y, float exitPressure, float throttle, float atmospherePressure, float diamondOffset, bool ripple = true)
+        // Mirrors the shader; without the ripple it is the smooth envelope. y is how far down the plume, of its length; past 1 only the spread in air goes on.
+        public static float GetFlameWidth(float y, float exitPressure, float throttle, float spread, float atmospherePressure, float diamondOffset, bool ripple = true)
         {
             const float gamma = 1.2f;
             const int diamondCount = 5;
+
+            float spreadY = Mathf.Max(y, 0);
+            y = Mathf.Clamp01(y);
 
             float flamePressure = exitPressure * Mathf.Lerp(0.1f, 1f, throttle);
             float ambientPressure = Mathf.Max(atmospherePressure, 1e-3f);
@@ -770,6 +825,9 @@ namespace SFS.Parts.Modules
 
             // Scale (based on pressure)
             width *= exitPressure * 3f;
+
+            // Spread in air
+            width += spread * GetTailPresence(atmospherePressure) * (spreadY < 1 ? 0.5f * spreadY * spreadY : spreadY - 0.5f);
 
             return 1f + width;
         }
