@@ -86,6 +86,7 @@ namespace SFS.Parts.Modules
         readonly List<Vector4> carried = new();
         readonly List<Vector4> speeds = new();
         readonly List<Vector2> cones = new();
+        readonly List<Vector2> ends = new();
         float puffSize;
         readonly List<int> indices = new();
 
@@ -316,6 +317,7 @@ namespace SFS.Parts.Modules
             carried.Clear();
             speeds.Clear();
             cones.Clear();
+            ends.Clear();
             indices.Clear();
 
             anchor = WorldView.main.positionOffset.Value;
@@ -343,6 +345,7 @@ namespace SFS.Parts.Modules
             mesh.SetUVs(1, shapes);
             mesh.SetUVs(2, smokes);
             mesh.SetUVs(3, carried);
+            mesh.SetUVs(4, ends);
             mesh.SetUVs(5, speeds);
             mesh.SetUVs(6, cones);
             mesh.SetTriangles(indices, 0, false);
@@ -417,13 +420,14 @@ namespace SFS.Parts.Modules
             {
                 Node older = new(points[i], anchor, now, trail.keepVisible);
                 older = older.Within(headRadius + (fromHead + Vector2.Distance(newer.position, older.position)) * slope);
-                fromHead += AddSegment(newer, older, fromHead, cone, trail, view, ref direction);
+                Vector2 open = new(!trail.Emitting && i == last - 1 ? 1 : 0, i == 0 ? 1 : 0); // ends no other segment takes over from
+                fromHead += AddSegment(newer, older, fromHead, cone, open, trail, view, ref direction);
                 newer = older;
             }
         }
 
         // One quad per segment, reaching past both ends by the cap its smoke is spread over
-        float AddSegment(Node newer, Node older, float fromHead, Vector2 cone, SmokeTrail trail, Rect view, ref Vector2 direction)
+        float AddSegment(Node newer, Node older, float fromHead, Vector2 cone, Vector2 open, SmokeTrail trail, Rect view, ref Vector2 direction)
         {
             Vector2 delta = older.position - newer.position;
             float length = delta.magnitude;
@@ -464,6 +468,7 @@ namespace SFS.Parts.Modules
                 carried.Add(GetCarried(newer.carried, older.carried, NoiseTile));
                 speeds.Add(new Vector4(newer.speed, older.speed, distortion));
                 cones.Add(cone);
+                ends.Add(open);
             }
 
             indices.Add(start);
