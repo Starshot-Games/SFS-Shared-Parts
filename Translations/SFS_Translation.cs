@@ -86,6 +86,12 @@ namespace SFS
             "<Size=70> Aris Semertzidis </size>",
             "<Size=55> Programmer </size>",
             "",
+            "<Size=70> Alice Demaret </size>",
+            "<Size=55> Artist </size>",
+            "",
+            "<Size=70> Adrien Orlu </size>",
+            "<Size=55> Artist </size>",
+            "",
             "<Size=70> Davi Vasc </size>",
             "<Size=55> Composer </size>",
             "",
@@ -300,6 +306,7 @@ namespace SFS
         [Documentation("Parts Expansion")]
         public F PartsExpansion_Tanks => A(nameof(PartsExpansion_Tanks), "Large variety of fuel tanks!");
         public F PartsExpansion_Engines => A(nameof(PartsExpansion_Engines), "Heavy lift engines!");
+        public F PartsExpansion_VacuumEngines => A(nameof(PartsExpansion_VacuumEngines), "High efficiency vacuum engines!");
         public F PartsExpansion_Parts => A(nameof(PartsExpansion_Parts), "Parts of all shapes and sizes!");
         public F PartsExpansion_Build => A(nameof(PartsExpansion_Build), "Large build space to bring" + "\n" + "your creations to life!");
         
