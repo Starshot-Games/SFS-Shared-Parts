@@ -29,12 +29,6 @@ namespace SFS.Parts.Modules
         [BoxGroup("Output", false)] public Double_Reference mass_Out = new();
         [BoxGroup("Output", false)] public bool setDensity = true;
 
-        // Patch
-        [Required] public GameObject heatHolder;
-        [Required] public GameObject heatHitbox;
-        Vector3 originalPosition;
-        Vector3 originalHitboxScale;
-
 
         // Injected
         Float_Local throttle_Input = new Float_Local();
@@ -48,9 +42,6 @@ namespace SFS.Parts.Modules
         public override Vector2 ThrustNormal => thrustVector.Value.normalized;
         public override Vector2 ThrustPosition => thrustPosition.Value;
         public override float Isp => ISP.Value * (float)Base.worldBase.settings.difficulty.IspMultiplier;
-        public override bool HeatOn => true; // Boosters lack a "heat on" variable, so heat is always considered on
-        public override GameObject HeatHolder => heatHolder;
-        public override GameObject HeatHitbox => heatHitbox;
         public override Float_Reference ThrottleOut => throttle_Out;
         public override Bool_Reference On => boosterOn;
 
@@ -122,18 +113,6 @@ namespace SFS.Parts.Modules
             wetMass.OnChange += RecalculateMass;
             dryMassPercent.OnChange += RecalculateMass;
             fuelPercent.OnChange += RecalculateMass;
-
-            if (heatHitbox == null)
-                heatHitbox = heatHolder;
-            
-            // Cache the authored hitbox scale so throttle only scales it, instead of overwriting it
-            originalHitboxScale = heatHitbox.transform.localScale;
-
-            throttle_Out.OnChange += () =>
-            {
-                heatHolder.SetActive(throttle_Out.Value > 0);
-                heatHitbox.transform.localScale = new Vector3(originalHitboxScale.x, originalHitboxScale.y * throttle_Out.Value, 1);
-            };
         }
 
         void RecalculateMass()
@@ -142,29 +121,6 @@ namespace SFS.Parts.Modules
 
             if (setDensity)
                 part.density.Value = Mathf.Lerp((float)DryMassPercent, 1, (float)fuelPercent.Value) * resourceType.density;
-        }
-
-
-        void Start()
-        {
-            if (GameManager.main != null)
-            {
-                originalPosition = heatHolder.transform.localPosition;
-                WorldView.main.onVelocityOffset += PositionFlameHitbox;
-            }
-        }
-
-        void OnDestroy()
-        {
-            if (GameManager.main != null)
-                WorldView.main.onVelocityOffset -= PositionFlameHitbox;
-        }
-
-        void PositionFlameHitbox(Vector2 _) => PositionFlameHitbox();
-        void PositionFlameHitbox()
-        {
-            // Physics simulation is one frame behind, this fixes it
-            heatHolder.transform.localPosition = originalPosition + heatHolder.transform.parent.InverseTransformVector(Rocket.rb2d.linearVelocity * Time.fixedDeltaTime);
         }
 
 
@@ -309,9 +265,6 @@ namespace SFS.Parts.Modules
             Vector2 force = Base.worldBase.AllowsCheats ? transform.TransformVector(force_Local) : transform.TransformVectorUnscaled(force_Local);
             Vector2 position = rb2d.GetRelativePoint(Transform_Utility.LocalToLocalPoint(transform, rb2d, thrustPosition.Value));
             rb2d.AddForceAtPosition(force, position, ForceMode2D.Force);
-
-            // Heat
-            PositionFlameHitbox();
         }
 
         // Implementation

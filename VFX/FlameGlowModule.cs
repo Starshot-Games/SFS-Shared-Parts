@@ -30,6 +30,9 @@ namespace SFS.Parts.Modules
         //
         bool CanRecordGround => CanRecord(0);
         bool CanRecordVacuum => CanRecord(1);
+
+        private FlameRandomizer[] randomizersCache;
+        
         //
         void RecordData(GlowsData a, float intendedVacuum)
         {
@@ -37,13 +40,25 @@ namespace SFS.Parts.Modules
                 throw new Exception("WARNING: in preview, not full throttle or non matching vacuum");
             
             glows = GetComponentsInChildren<SpriteRenderer>();
+            randomizersCache = null;
             a.color = glows.Select(x => x.color).ToArray();
             a.position = glows.Select(x => (Vector2)x.transform.localPosition).ToArray();
             a.scale = glows.Select(x => (Vector2)x.transform.localScale).ToArray();
         }
         bool CanRecord(float intendedVacuum) => lastApplied_Throttle == 1 && lastApplied_Vacuum == intendedVacuum;
 
-
+        // Built on first use, as OnValidate applies in the editor before Start would ever run
+        FlameRandomizer[] GetRandomizers()
+        {
+            if (randomizersCache == null || randomizersCache.Length != glows.Length)
+            {
+                randomizersCache = new FlameRandomizer[glows.Length];
+                for (int i = 0; i < glows.Length; i++)
+                    randomizersCache[i] = glows[i] != null ? glows[i].GetComponent<FlameRandomizer>() : null;
+            }
+            return randomizersCache;
+        }
+        
         // Driven by EngineEffects - it gathers throttle/vacuum once and pushes them in here.
         // visibility is its flame's: under 1 while a brighter flame burning alongside drowns it out.
         public void Apply(float throttle, float vacuum, float visibility = 1)
@@ -62,6 +77,7 @@ namespace SFS.Parts.Modules
 
             if (on)
             {
+                FlameRandomizer[] randomizers = GetRandomizers();
                 int maxValid = Mathf.Min(glows.Length, vac ? 1000 : groundData.color.Length, vacuumData.color.Length);
                 for (int i = 0; i < maxValid; i++)
                 {
@@ -82,7 +98,9 @@ namespace SFS.Parts.Modules
                     // Scale (hand it to FlameRandomizer if present, else set localScale directly)
                     Vector2 scale = Vector2.Lerp(groundData.scale[i], vacuumData.scale[i], vacuum);
                     //
-                    FlameRandomizer randomizer = a.GetComponent<FlameRandomizer>();
+
+                    var randomizer = randomizers[i];
+                    
                     if (randomizer != null)
                         randomizer.size = scale;
                     else

@@ -1,3 +1,5 @@
+using System;
+using SFS.Parts.Modules;
 using UnityEngine;
 
 namespace SFS.World.Drag
@@ -5,6 +7,7 @@ namespace SFS.World.Drag
     public abstract class HeatModuleBase : MonoBehaviour
     {
         public Valid valid = new Valid();
+        
         void OnEnable() => valid.valid = true;
         void OnDisable() => valid.valid = false;
 
@@ -15,8 +18,10 @@ namespace SFS.World.Drag
         public abstract int LastAppliedIndex { get; set; }
         public abstract float ExposedSurface { get; set; }
         
+        public abstract HeatboxModule[] IgnoredHeatboxes { get; }
         public abstract float HeatTolerance { get; }
         public abstract void OnOverheat(bool breakup);
+        public abstract void Heat();
     }
 
     public class Valid

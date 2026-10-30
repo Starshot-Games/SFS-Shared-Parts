@@ -30,6 +30,9 @@ namespace SFS.Parts
         [BoxGroup("Refs", false), Required] public VariablesModule variablesModule;
 
         [Space]
+        public HeatboxModule[] ignoredHeatboxes = Array.Empty<HeatboxModule>();
+        
+        [Space]
         [LabelText("Pick Section (Optional)")] public TranslationVariable pickCategoryName = new TranslationVariable();
         public Variants[] variants = Array.Empty<Variants>();
         public UsePartUnityEvent onPartUsed;
@@ -300,6 +303,7 @@ namespace SFS.Parts
         public override float Temperature { get => temperature; set => temperature = value; }
         public override int LastAppliedIndex { get; set; } = -1;
         public override float ExposedSurface { get; set; } = 0;
+        public override HeatboxModule[] IgnoredHeatboxes => ignoredHeatboxes;
         public override float HeatTolerance => AeroModule.GetHeatTolerance(World.Drag.HeatTolerance.Low);
         public override void OnOverheat(bool breakup) => OnOverheat(this, breakup);
         public void OnOverheat(HeatModuleBase module, bool breakup)
@@ -330,6 +334,10 @@ namespace SFS.Parts
             }
         }
 
+        public override void Heat()
+        {
+            Rocket.aero.heatManager.HeatPart(this);
+        }
 
         // Build undo utility
         public Action<Part> aboutToDestroy;
@@ -351,7 +359,15 @@ namespace SFS.Parts
 
             Destroy(gameObject);
         }
-        
+
+        public void ApplyPushing(ThrustBase engine)
+        {
+            Vector2 thrustPoint = Transform_Utility.LocalToLocalPoint(engine, Rocket, engine.ThrustPosition);
+            Vector2 thrustDirection = Transform_Utility.LocalToLocalDirection(engine, Rocket, engine.ThrustNormal).normalized;
+            Vector2 force = thrustDirection * (float)(engine.ThrottleOut.Value * engine.ThrustAmount * -0.5);
+            Rocket.rb2d.AddForceAtPosition(force, thrustPoint, ForceMode2D.Force);
+            Debug.DrawRay(thrustPoint, force, Color.red);
+        }
         
         // Magnet gizmos
         #if UNITY_EDITOR

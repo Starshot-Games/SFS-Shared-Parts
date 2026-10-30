@@ -102,6 +102,7 @@ namespace SFS.Parts.Modules
         [NonSerialized] public Vector3 smokeCover; // meshY where the smoke over this flame starts to show, where it has, and how much it hides the flame there
         [NonSerialized] public FlameGlare[] glare = new FlameGlare[FlameMergeSolver.MaxGlareSources];
         [NonSerialized] public int glareCount;
+        [NonSerialized] public FlameMergeSolver.Inputs mergeInputs;
         bool registered;
 
         // Scratch for handing the glare to the shader, which takes it as arrays. Always sent whole:
@@ -796,40 +797,56 @@ namespace SFS.Parts.Modules
         // Mirrors the shader; without the ripple it is the smooth envelope. y is how far down the plume, of its length; past 1 only the spread in air goes on.
         public static float GetFlameWidth(float y, float exitPressure, float throttle, float spread, float atmospherePressure, float diamondOffset, bool ripple = true)
         {
-            const float gamma = 1.2f;
             const int diamondCount = 5;
 
-            float spreadY = Mathf.Max(y, 0);
-            y = Mathf.Clamp01(y);
-
-            float flamePressure = exitPressure * Mathf.Lerp(0.1f, 1f, throttle);
-            float ambientPressure = Mathf.Max(atmospherePressure, 1e-3f);
-
-            float width = 0f;
+            float width = new Envelope(exitPressure, throttle, spread, atmospherePressure).GetWidth(y);
 
             // Mach diamonds
             if (ripple)
             {
+                y = Mathf.Clamp01(y);
                 float diamonds = Mathf.Abs(Mathf.Sin((y * diamondCount - diamondOffset) * Mathf.PI))
                                  - Mathf.Abs(Mathf.Sin(-diamondOffset * Mathf.PI));
-                width += diamonds * GetDiamondsStrength(flamePressure, ambientPressure) * 0.3f;
+                width += diamonds * GetDiamondsStrength(GetFlamePressure(exitPressure, throttle), GetAmbientPressure(atmospherePressure)) * 0.3f * exitPressure * 3f;
             }
 
-            // Standard expansion
-            width += y * 0.5f;
+            return width;
+        }
 
-            // Vac / underexpanded billow
-            float pressureRatio = flamePressure / ambientPressure;
-            float expandWidth = Mathf.Pow(Mathf.Max(pressureRatio, 1f), 1f / (2f * gamma)) - 1f;
-            width += expandWidth * (Mathf.Sqrt(y + 0.05f) - Mathf.Sqrt(0.05f)) * 1.3f;
+        static float GetFlamePressure(float exitPressure, float throttle) => exitPressure * Mathf.Lerp(0.1f, 1f, throttle);
+        static float GetAmbientPressure(float atmospherePressure) => Mathf.Max(atmospherePressure, 1e-3f);
 
-            // Scale (based on pressure)
-            width *= exitPressure * 3f;
+        // GetFlameWidth without the ripple, with what doesn't change down the plume worked out once
+        public readonly struct Envelope
+        {
+            readonly float scale, billow, billowStart, spread;
 
-            // Spread in air
-            width += spread * GetTailPresence(atmospherePressure) * (spreadY < 1 ? 0.5f * spreadY * spreadY : spreadY - 0.5f);
+            public Envelope(float exitPressure, float throttle, float spread, float atmospherePressure)
+            {
+                const float gamma = 1.2f;
 
-            return 1f + width;
+                // Vac / underexpanded billow
+                float pressureRatio = GetFlamePressure(exitPressure, throttle) / GetAmbientPressure(atmospherePressure);
+                billow = (Mathf.Pow(Mathf.Max(pressureRatio, 1f), 1f / (2f * gamma)) - 1f) * 1.3f;
+                billowStart = billow * Mathf.Sqrt(0.05f);
+
+                // Scale (based on pressure)
+                scale = exitPressure * 3f;
+
+                // Spread in air
+                this.spread = spread * GetTailPresence(atmospherePressure);
+            }
+
+            public float GetWidth(float y)
+            {
+                float spreadY = Mathf.Max(y, 0);
+                y = Mathf.Clamp01(y);
+
+                // Standard expansion
+                float width = y * 0.5f + billow * Mathf.Sqrt(y + 0.05f) - billowStart;
+
+                return 1f + width * scale + spread * (spreadY < 1 ? 0.5f * spreadY * spreadY : spreadY - 0.5f);
+            }
         }
 
         // Real atmospheres thin out exponentially with altitude (barometric law: P ~ exp(-h/H)).

@@ -664,11 +664,20 @@ namespace SFS.Parts.Modules
             lastEmit = now;
         }
 
+        // Points that may have hit the ground this step, whose heights are then sampled all at once
+        static readonly List<int> grounding = new();
+        static readonly List<Point> groundingFrom = new();
+        static readonly List<double> groundingAngles = new();
+
         // Carries the smoke that's been let go on through the air, one physics step
         public void Move(float deltaTime)
         {
             if (!(deltaTime > 0))
                 return;
+
+            grounding.Clear();
+            groundingFrom.Clear();
+            groundingAngles.Clear();
 
             for (int i = 0; i < points.Count; i++)
             {
@@ -683,7 +692,6 @@ namespace SFS.Parts.Modules
                 point.position += moved;
                 point.carried += moved;
                 point.velocity *= decay;
-                StayAboveGround(ref point);
 
                 if (!IsFinite(point.position) || !IsFinite(point.carried))
                 {
@@ -691,10 +699,44 @@ namespace SFS.Parts.Modules
                     point.carried = points[i].carried;
                     point.velocity = Vector2.zero;
                 }
-                if (point.velocity.sqrMagnitude < MinSpeed * MinSpeed || !float.IsFinite(point.velocity.x) || !float.IsFinite(point.velocity.y))
-                    point.velocity = Vector2.zero;
+                else if (MayHitGround(point))
+                {
+                    grounding.Add(i);
+                    groundingFrom.Add(points[i]);
+                    groundingAngles.Add(point.position.AngleRadians);
+                    points[i] = point;
+                    continue;
+                }
+
+                StopIfSlow(ref point);
                 points[i] = point;
             }
+
+            if (grounding.Count == 0)
+                return;
+
+            double[] heights = planet.GetTerrainHeightAtAngles(groundingAngles.ToArray(), true);
+            for (int n = 0; n < grounding.Count; n++)
+            {
+                int i = grounding[n];
+                Point point = points[i];
+                StayAboveGround(ref point, heights[n]);
+
+                if (!IsFinite(point.position))
+                {
+                    point.position = groundingFrom[n].position;
+                    point.carried = groundingFrom[n].carried;
+                    point.velocity = Vector2.zero;
+                }
+                StopIfSlow(ref point);
+                points[i] = point;
+            }
+        }
+
+        static void StopIfSlow(ref Point point)
+        {
+            if (point.velocity.sqrMagnitude < MinSpeed * MinSpeed || !float.IsFinite(point.velocity.x) || !float.IsFinite(point.velocity.y))
+                point.velocity = Vector2.zero;
         }
 
         public void Simulate(double now)
@@ -722,14 +764,16 @@ namespace SFS.Parts.Modules
             }
         }
 
+        bool MayHitGround(in Point point)
+        {
+            return point.position.magnitude <= planet.Radius + System.Math.Max(planet.maxTerrainHeight, 0) + 1 && Double2.Dot(point.position, (Double2)point.velocity) < 0;
+        }
+
         // Smoke blown into the ground spreads out along it instead
-        void StayAboveGround(ref Point point)
+        void StayAboveGround(ref Point point, double terrainHeight)
         {
             double radius = point.position.magnitude;
-            if (radius > planet.Radius + System.Math.Max(planet.maxTerrainHeight, 0) + 1 || Double2.Dot(point.position, (Double2)point.velocity) >= 0)
-                return;
-
-            double ground = planet.Radius + planet.GetTerrainHeightAtAngle(point.position.AngleRadians, true);
+            double ground = planet.Radius + terrainHeight;
             if (radius >= ground)
                 return;
 

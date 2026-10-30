@@ -119,30 +119,5 @@ namespace SFS.Parts.Modules
             High,
             Wheel,
         }
-        
-        void OnTriggerStay2D(Collider2D other)
-        {
-            if (other.gameObject.layer == flameHeatLayer)
-                if (other != ownEngineNozzle)
-                {
-                    if (other.GetComponentInParent<ThrustBase>() is not { } module)
-                    {
-                        Debug.LogError("No valid ThrustBase module linked to the flame - skipping heating/pushing!");
-                        return;
-                    }
-                    
-                    if (module.HeatOn || !Base.worldBase.AllowsCheats)
-                        rocket.aero.heatManager.HeatPart(heatModule);
-                    
-                    // Parts will be pushed away by flames if they're in the heatbox
-                    if (rocket == module.Rocket)
-                        return;
-                    Vector2 thrustPoint = Transform_Utility.LocalToLocalPoint(module, rocket, module.ThrustPosition);
-                    Vector2 thrustDirection = Transform_Utility.LocalToLocalDirection(module, rocket, module.ThrustNormal).normalized;
-                    Vector2 force = thrustDirection * (float)(module.ThrottleOut.Value * module.ThrustAmount * -0.5);
-                    rocket.rb2d.AddForceAtPosition(force, thrustPoint, ForceMode2D.Force);
-                    Debug.DrawRay(thrustPoint, force, Color.red);
-                }
-        }
     }
 }

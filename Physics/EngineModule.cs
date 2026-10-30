@@ -30,27 +30,13 @@ namespace SFS.Parts.Modules
         //
         [BoxGroup("Vacuum", false)] public bool isVacuum;
         public const double vacuumMaxPressure = 0.25; // bar (surface = 1); vacuum engines can't ignite where ambient pressure is above this
-        // Heat
-        [Space, Space]
-        public Bool_Reference heatOn;
-        //
-        public bool multipleNozzles;
-        [HideIf(nameof(multipleNozzles)), Required] public GameObject heatHolder;
-        [HideIf(nameof(multipleNozzles)), Required] public GameObject heatHitbox;
-        [HideIf(nameof(multipleNozzles))] Vector3 originalPosition;
-        [HideIf(nameof(multipleNozzles))] Vector3 originalHitboxScale;
-        //
-        [ShowIf(nameof(multipleNozzles))] public HeatHitbox[] heatHitboxes;
 
 
         // ThrustBase (engine values already match the base format 1:1)
         public override float ThrustAmount => thrust.Value;
-        public override Vector2 ThrustNormal => thrustNormal.Value;
+        public override Vector2 ThrustNormal => thrustNormal.Value.normalized;
         public override Vector2 ThrustPosition => thrustPosition.Value;
         public override float Isp => ISP.Value * (float)Base.worldBase.settings.difficulty.IspMultiplier;
-        public override bool HeatOn => heatOn.Value;
-        public override GameObject HeatHolder => heatHolder;
-        public override GameObject HeatHitbox => heatHitbox;
         public override Float_Reference ThrottleOut => throttle_Out;
         public override Bool_Reference On => engineOn;
 
@@ -110,13 +96,6 @@ namespace SFS.Parts.Modules
             }
         }
 
-        void OnValidate()
-        {
-            if (!multipleNozzles)
-                if (heatHitbox == null && heatHolder != null && heatHolder.transform.childCount > 0)
-                    heatHitbox = heatHolder.transform.GetChild(0).gameObject;
-        }
-
         void Awake()
         {
             if (float.IsNaN(oldMass) || Base.worldBase == null)
@@ -155,50 +134,7 @@ namespace SFS.Parts.Modules
                 throttle_Out.OnChange += RecalculateGimbal;
                 turnAxis_Input.OnChange += RecalculateGimbal;
             }
-
-            OnValidate();
-            
-            if (GameManager.main != null)
-            {
-                if (multipleNozzles)
-                    foreach (HeatHitbox hitbox in heatHitboxes)
-                        hitbox.originalPosition = hitbox.heatHolder.transform.localPosition;
-                else
-                    originalPosition = heatHolder.transform.localPosition;
-                
-                WorldView.main.onVelocityOffset += PositionFlameHitbox;
-            }
-            
-            // Cache the authored hitbox scale so throttle only scales it, instead of overwriting it
-            if (multipleNozzles)
-                foreach (HeatHitbox hitbox in heatHitboxes)
-                    hitbox.originalScale = hitbox.heatHitbox.transform.localScale;
-            else
-                originalHitboxScale = heatHitbox.transform.localScale;
-            
-            throttle_Out.OnChange += () =>
-            {
-                if (multipleNozzles)
-                {
-                    foreach (HeatHitbox hitbox in heatHitboxes)
-                    {
-                        hitbox.heatHolder.SetActive(throttle_Out.Value > 0);
-                        hitbox.heatHitbox.transform.localScale = new Vector3(hitbox.originalScale.x, hitbox.originalScale.y * throttle_Out.Value, 1);   
-                    }
-                }
-                else
-                {
-                    heatHolder.SetActive(throttle_Out.Value > 0);
-                    heatHitbox.transform.localScale = new Vector3(originalHitboxScale.x, originalHitboxScale.y * throttle_Out.Value, 1);   
-                }
-            };
         }
-        void OnDestroy()
-        {
-            if (GameManager.main != null)
-                WorldView.main.onVelocityOffset -= PositionFlameHitbox;
-        }
-        void PositionFlameHitbox(Vector2 _) => PositionFlameHitbox();
         
         
         // On Change
@@ -241,31 +177,8 @@ namespace SFS.Parts.Modules
             // Force
             Vector2 force_Local = thrustNormal.Value * (thrust.Value * 9.8f * throttle_Out.Value);
             Vector2 force = Base.worldBase.AllowsCheats? transform.TransformVector(force_Local) : transform.TransformVectorUnscaled(force_Local);
-            Vector2 position = Rb2d.GetRelativePoint(Transform_Utility.LocalToLocalPoint(transform, Rb2d, thrustPosition.Value));
 
             Check(ref force);
-
-            Rb2d.AddForceAtPosition(force, position, ForceMode2D.Force);
-            
-            // Heat
-            PositionFlameHitbox();
-        }
-        void PositionFlameHitbox()
-        {
-            if (Base.sceneLoader.isUnloading)
-                return;
-            
-            // Physics simulation is one frame behind, this fixes it
-            if (multipleNozzles)
-            {
-                foreach (HeatHitbox hitbox in heatHitboxes)
-                {
-                    Transform h = hitbox.heatHolder.transform;
-                    h.localPosition = hitbox.originalPosition + h.parent.InverseTransformVector(Rb2d.linearVelocity * Time.fixedDeltaTime);
-                }
-            }
-            else
-                heatHolder.transform.localPosition = originalPosition + heatHolder.transform.parent.InverseTransformVector(Rb2d.linearVelocity * Time.fixedDeltaTime);
         }
 
 

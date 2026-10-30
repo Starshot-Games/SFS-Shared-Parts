@@ -30,7 +30,6 @@ namespace Parts
         Color IsMagnets => viewMode == ViewMode.Magnets ? Color.green : Color.gray;
         Color IsAdaptTriggers => viewMode == ViewMode.AdaptTriggers ? Color.green : Color.gray;
         Color IsNozzleCoverHitbox => viewMode == ViewMode.NozzleCoverHitbox ? Color.green : Color.gray;
-        Color IsHeatHitbox => viewMode == ViewMode.HeatHitbox ? Color.green : Color.gray;
         
         [PropertySpace]
         [Button(ButtonSizes.Large), GUIColor(nameof(IsNone))] void None() => viewMode = ViewMode.None;
@@ -50,8 +49,6 @@ namespace Parts
 
         [Title("Engines")]
         [Button(ButtonSizes.Large), GUIColor(nameof(IsNozzleCoverHitbox))] void NozzleCoverHitbox() => viewMode = ViewMode.NozzleCoverHitbox;
-        [Button(ButtonSizes.Large), GUIColor(nameof(IsHeatHitbox))] void HeatHitbox() => viewMode = ViewMode.HeatHitbox;
-        
 
         #if UNITY_EDITOR
         void OnDrawGizmos()
@@ -118,27 +115,6 @@ namespace Parts
                     Handles.color = Color.red;
                     GetComponentsInChildren<IsCoveredModule>().ForEach(e => DrawSurface(e.surface, false));
                     GetComponentsInChildren<BoosterModule>().Where(b => b.surfaceForCover != null).ForEach(e => DrawSurface(e.surfaceForCover, true));
-                    break;
-                
-                case ViewMode.HeatHitbox:
-                    Handles.color = Color.orangeRed;
-                    GetComponentsInChildren<BoosterModule>().ForEach(b => DrawBoxCollider(b.heatHolder.GetComponent<BoxCollider2D>()));
-                    GetComponentsInChildren<EngineModule>().ForEach(e =>
-                    {
-                        if (e.multipleNozzles)
-                        {
-                            foreach (HeatHitbox hitbox in e.heatHitboxes)
-                            {
-                                DrawBoxCollider(hitbox.heatHolder.GetComponent<BoxCollider2D>());   
-                                DrawBoxCollider(hitbox.heatHitbox.GetComponent<BoxCollider2D>());   
-                            }
-                        }
-                        else
-                        {
-                            DrawBoxCollider(e.heatHolder.GetComponent<BoxCollider2D>());
-                            DrawBoxCollider(e.heatHolder.GetComponentInChildren<BoxCollider2D>());
-                        }
-                    });
                     break;
             }
         }
@@ -273,7 +249,6 @@ namespace Parts
             CenterOfMass,
             
             NozzleCoverHitbox,
-            HeatHitbox,
         }
     }
 }
