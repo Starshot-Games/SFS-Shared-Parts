@@ -29,6 +29,10 @@ namespace SFS.Parts.Modules
         Material appliedMaterial;
         MaterialPropertyBlock propertyBlock;
 
+        // Last applied submesh data, so property blocks can be refreshed without regenerating the mesh
+        PartTex[] appliedTextures = new PartTex[0];
+        float appliedBaseDepth, appliedDepthMultiplier;
+
         MeshRenderer GetRenderer() => meshRendererCache != null? meshRendererCache : meshRendererCache = this.GetOrAddComponent<MeshRenderer>();
         MeshFilter GetFilter() => meshFilterCache != null? meshFilterCache : meshFilterCache = this.GetOrAddComponent<MeshFilter>();
 
@@ -66,7 +70,9 @@ namespace SFS.Parts.Modules
             //
             mesh.SetUVs(3, depths);
 
-            
+            appliedBaseDepth = baseDepth;
+            appliedDepthMultiplier = depthMultiplier;
+
             // Indices, materials, property blocks
             if (textures.Count > 1)
                 Set_TrySubmeshes();
@@ -96,7 +102,8 @@ namespace SFS.Parts.Modules
             {
                 SetMaterials(submeshes.Count);
                 mesh.subMeshCount = submeshes.Count;
-                
+                appliedTextures = new PartTex[submeshes.Count];
+
                 int submeshIndex = 0;
                 foreach (List<int> pointers in submeshes.Values)
                 {
@@ -111,7 +118,8 @@ namespace SFS.Parts.Modules
                     }
                     
                     // Indices // Property block
-                    SetPropertyBlock(textures[pointers[0]], submeshIndex);
+                    appliedTextures[submeshIndex] = textures[pointers[0]];
+                    ApplyPropertyBlock(meshRenderer, textures[pointers[0]], submeshIndex);
                     mesh.SetIndices(list, topology, submeshIndex);
                     submeshIndex++;
                 }
@@ -122,8 +130,9 @@ namespace SFS.Parts.Modules
                 SetMaterials(1);
 
                 // Property block
+                appliedTextures = textures.Count > 0? new[] { textures[0] } : new PartTex[0];
                 if (textures.Count > 0)
-                    SetPropertyBlock(textures[0], 0);
+                    ApplyPropertyBlock(meshRenderer, textures[0], 0);
             }
             void SetMaterials(int count)
             {
@@ -151,31 +160,44 @@ namespace SFS.Parts.Modules
 
                 meshRenderer.sharedMaterials = appliedMaterials;
             }
-            void SetPropertyBlock(PartTex T, int index)
-            {
-                if (propertyBlock == null)
-                    propertyBlock = new MaterialPropertyBlock();
 
-                propertyBlock.Clear();
-
-                if (meshRenderer.HasPropertyBlock())
-                    meshRenderer.GetPropertyBlock(propertyBlock, index);
-
-                // Tex
-                propertyBlock.SetTexture(PartTex.ColorTexture, T.color);
-                propertyBlock.SetTexture(PartTex.ShapeTexture, T.shape);
-                propertyBlock.SetTexture(PartTex.ShadowTexture, T.shadow);
-                
-                // Depth
-                propertyBlock.SetFloat(baseDepthID, baseDepth);
-                propertyBlock.SetFloat(depthMultiplierID, depthMultiplier);
-                
-                meshRenderer.SetPropertyBlock(propertyBlock, index);
-            }
-            
 
             // Applies new mesh data
             mesh.RecalculateBounds();
+        }
+        void ApplyPropertyBlock(Renderer meshRenderer, PartTex T, int index)
+        {
+            if (propertyBlock == null)
+                propertyBlock = new MaterialPropertyBlock();
+
+            propertyBlock.Clear();
+
+            if (meshRenderer.HasPropertyBlock())
+                meshRenderer.GetPropertyBlock(propertyBlock, index);
+
+            // Tex
+            propertyBlock.SetTexture(PartTex.ColorTexture, T.color);
+            propertyBlock.SetTexture(PartTex.ShapeTexture, T.shape);
+            propertyBlock.SetTexture(PartTex.ShadowTexture, T.shadow);
+
+            // Depth
+            propertyBlock.SetFloat(baseDepthID, appliedBaseDepth);
+            propertyBlock.SetFloat(depthMultiplierID, appliedDepthMultiplier);
+
+            SetCustomProperties(propertyBlock);
+
+            meshRenderer.SetPropertyBlock(propertyBlock, index);
+        }
+
+        // Extra per renderer properties (skin colors), applied with every property block
+        protected virtual void SetCustomProperties(MaterialPropertyBlock block) { }
+
+        // Re-applies property blocks of the current mesh, for changes that don't affect geometry
+        protected void RefreshPropertyBlocks()
+        {
+            Renderer meshRenderer = GetRenderer();
+            for (int i = 0; i < appliedTextures.Length; i++)
+                ApplyPropertyBlock(meshRenderer, appliedTextures[i], i);
         }
 
         // Gets mesh component or adds it if it doesn't exist

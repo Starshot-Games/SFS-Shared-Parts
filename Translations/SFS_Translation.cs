@@ -529,6 +529,13 @@ namespace SFS
         public F Launch_Horizontally_Confirm => A(nameof(Launch_Horizontally_Confirm), "Launch Horizontally");
         public F Launch_Vertically_Confirm => A(nameof(Launch_Vertically_Confirm), "Launch Vertically");
         //
+        [Documentation("Skin color menus")]
+        public F Custom_Colors => A(nameof(Custom_Colors), "Custom colors");
+        public F Edit_Color => A(nameof(Edit_Color), "Edit");
+        public F Hex_Color => A(nameof(Hex_Color), "Hex color");
+        public F Smoothness => A(nameof(Smoothness), "Smoothness");
+        public F Metallic => A(nameof(Metallic), "Metallic");
+        //
         [Documentation("Example rockets")]
         public F Example_Rockets_OpenMenu => A(nameof(Example_Rockets_OpenMenu), "Example Rockets");
         public F Basic_Rocket => A(nameof(Basic_Rocket), "Basic Rocket");

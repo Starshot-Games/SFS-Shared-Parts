@@ -79,6 +79,9 @@ namespace SFS.Parts.Modules
             GetSlopeShading(points.elements, slopeShading);
             GetMeshQuads(points.elements, uv_Elements, color_Channel.element, slopeShading, data);
 
+            // Same flip the color textures use, so the metallic gradient faces the light
+            skinLightFlip = Vector2.Angle(transform.TransformVector(Vector2.left), GetLightDirection()) > 90? 1 : 0;
+
             // Generates mesh
             ApplyMeshData(data.vertices, GetQuadIndices(points.elements), data.UVs, data.colors, data.shading, data.depths, pipeData.BaseDepth, pipeData.depthMultiplier, data.textures, MeshTopology.Quads);
         }
@@ -186,15 +189,51 @@ namespace SFS.Parts.Modules
 
         // Used by skin module
         [HideInInspector] public Event_Local onSetColorTexture;
+        SkinColor skinColorA = SkinColor.White, skinColorB = SkinColor.DarkGray;
+        bool skinTint;
+        float skinLightFlip;
+        public SkinColor SkinColorA => skinColorA;
+        public SkinColor SkinColorB => skinColorB;
+        public bool SkinTint => skinTint;
+
         public void SetColorTexture(ColorTexture colorTexture)
         {
-            if (textures.texture.colorTexture == colorTexture)
+            SkinLegacy.Resolve(colorTexture, null, null, out ColorTexture resolved, out SkinColor a, out SkinColor b);
+            SetSkin(resolved, a, b);
+        }
+        public void SetSkin(ColorTexture colorTexture, SkinColor colorA, SkinColor colorB)
+        {
+            bool tint = colorTexture != null && colorTexture.Tintable;
+            bool textureChanged = textures.texture.colorTexture != colorTexture;
+            bool colorsChanged = skinTint != tint || !skinColorA.Equals(colorA) || !skinColorB.Equals(colorB);
+
+            if (!textureChanged && !colorsChanged)
                 return;
 
             textures.texture.colorTexture = colorTexture;
-            GenerateMesh();
-            
-            onSetColorTexture?.Invoke();
+            skinTint = tint;
+            skinColorA = colorA;
+            skinColorB = colorB;
+
+            if (textureChanged)
+            {
+                GenerateMesh();
+                onSetColorTexture?.Invoke();
+            }
+            else
+                RefreshPropertyBlocks();
+        }
+        protected override void SetCustomProperties(MaterialPropertyBlock block)
+        {
+            block.SetFloat(SkinRendering.SkinTint, skinTint? 1 : 0);
+
+            if (!skinTint)
+                return;
+
+            block.SetColor(SkinRendering.SkinColorA, skinColorA.Color);
+            block.SetColor(SkinRendering.SkinColorB, skinColorB.Color);
+            block.SetVector(SkinRendering.SkinParams, new Vector4(skinColorA.metallic? 1 : 0, skinColorA.smoothness, skinColorB.metallic? 1 : 0, skinColorB.smoothness));
+            block.SetFloat(SkinRendering.SkinLightFlip, skinLightFlip);
         }
         public void SetShapeTexture(ShapeTexture shapeTexture)
         {

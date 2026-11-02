@@ -109,6 +109,14 @@ namespace SFS.Parts
             return output;
         }
         
+        // Copy that draws each texture's mask instead, for tinted skins
+        public PartTexture WithMasks()
+        {
+            PartTexture copy = (PartTexture)MemberwiseClone();
+            copy.textures = Array.ConvertAll(textures, t => new PerValueTexture { texture = t.mask != null? t.mask : t.texture, ideal = t.ideal });
+            return copy;
+        }
+
         public Texture2D GetBestTexture(float shapeWidth)
         {
             PerValueTexture best = textures[0];
@@ -153,7 +161,9 @@ namespace SFS.Parts
     public class PerValueTexture
     {
         public Texture2D texture;
-        public float ideal;    
+        public float ideal;
+        [Tooltip("Grayscale version used when the skin is tinted (white = primary color); empty uses the texture itself")]
+        public Texture2D mask;    
     }
 
     // Vertical
