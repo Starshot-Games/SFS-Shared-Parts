@@ -109,9 +109,11 @@ namespace SFS.Parts
     // Old solid color textures that are now the uniform pattern tinted with that color, so old saves can be recolored
     public static class SkinLegacy
     {
-        public const string UniformPattern = "Color_White";
+        // Tintable copies of old textures, so packs made before skin colors replace the old texture and not the pattern
+        public const string TintSuffix = "_Tint";
+        public const string UniformPattern = "Color_White" + TintSuffix;
 
-        static readonly Dictionary<string, SkinColor> conversions = new Dictionary<string, SkinColor>
+        static readonly Dictionary<string, SkinColor> colors = new Dictionary<string, SkinColor>
         {
             { "Color_Black", new SkinColor(new Color32(64, 64, 64, 255)) },
             { "Color_Gray", new SkinColor(new Color32(110, 110, 110, 255)) },
@@ -119,32 +121,42 @@ namespace SFS.Parts
         };
 
         // The game's own versions; one replaced by a texture pack is not converted
-        static readonly Dictionary<string, PartTexture> stock = new Dictionary<string, PartTexture>();
+        static readonly Dictionary<string, (PartTexture id, string pattern)> stock = new Dictionary<string, (PartTexture, string)>();
 
         public static void RegisterStock(Dictionary<string, ColorTexture> textures)
         {
             stock.Clear();
 
-            foreach (string textureName in conversions.Keys)
-                if (textures.TryGetValue(textureName, out ColorTexture texture))
-                    stock[textureName] = texture.GetTexID();
+            foreach (ColorTexture texture in textures.Values)
+                if (colors.ContainsKey(texture.name))
+                    stock[texture.name] = (texture.GetTexID(), UniformPattern);
+                else if (textures.ContainsKey(texture.name + TintSuffix))
+                    stock[texture.name] = (texture.GetTexID(), texture.name + TintSuffix);
         }
-        static bool IsStock(ColorTexture texture) => stock.TryGetValue(texture.name, out PartTexture id) && texture.GetTexID() == id;
+        static bool IsStock(ColorTexture texture, out string pattern)
+        {
+            pattern = stock.TryGetValue(texture.name, out var entry) && texture.GetTexID() == entry.id? entry.pattern : null;
+            return pattern != null;
+        }
 
-        public static bool IsLegacy(string textureName) => textureName != null && conversions.ContainsKey(textureName);
+        public static bool IsLegacy(string textureName) => textureName != null && stock.ContainsKey(textureName);
         // The game's own solid colors, which skin colors replace in the pattern list
-        public static bool IsStockLegacy(ColorTexture texture) => conversions.ContainsKey(texture.name) && IsStock(texture);
+        public static bool IsStockLegacy(ColorTexture texture) => IsStock(texture, out _);
+        public static bool HiddenFromPicker(ColorTexture texture) => DevSettings.NewSkinSystem? IsStockLegacy(texture) : texture.tintable;
 
-        public static bool TryConvert(ColorTexture texture, out ColorTexture pattern, out SkinColor color)
+        public static bool TryConvert(ColorTexture texture, out ColorTexture pattern, out SkinColor? color)
         {
             pattern = null;
-            color = SkinColor.White;
+            color = null;
 
-            if (texture == null || texture.Tintable || !conversions.TryGetValue(texture.name, out color) || !IsStock(texture))
+            if (texture == null || texture.Tintable || !IsStock(texture, out string patternName))
                 return false;
 
-            if (Base.partsLoader == null || !Base.partsLoader.colorTextures.TryGetValue(UniformPattern, out pattern) || !pattern.Tintable)
+            if (Base.partsLoader == null || !Base.partsLoader.colorTextures.TryGetValue(patternName, out pattern) || !pattern.Tintable)
                 return false;
+
+            if (colors.TryGetValue(texture.name, out SkinColor solid))
+                color = solid;
 
             return true;
         }
@@ -154,7 +166,7 @@ namespace SFS.Parts
         {
             resolved = pattern;
 
-            if (TryConvert(pattern, out ColorTexture converted, out SkinColor legacyColor))
+            if (TryConvert(pattern, out ColorTexture converted, out SkinColor? legacyColor))
             {
                 resolved = converted;
                 colorA ??= legacyColor;

@@ -102,18 +102,22 @@ namespace SFS.Parts.Modules
         // Old saves store a solid color texture, it becomes the uniform pattern with that color so it can be recolored
         void ConvertLegacySkin()
         {
-            if (colorA == null || HasValue(colorA) || HasValue(colorB))
+            if (colorA == null)
                 return;
 
             string key = colorTextureName.Value;
             if (key == null || Base.partsLoader == null || !Base.partsLoader.colorTextures.TryGetValue(key, out ColorTexture saved))
                 return;
 
-            if (!SkinLegacy.TryConvert(saved, out ColorTexture pattern, out SkinColor color))
+            if (!SkinLegacy.TryConvert(saved, out ColorTexture pattern, out SkinColor? color))
+                return;
+
+            if (color.HasValue && (HasValue(colorA) || HasValue(colorB)))
                 return;
 
             colorTextureName.Value = pattern.name;
-            colorA.Value = color.Serialize();
+            if (color.HasValue)
+                colorA.Value = color.Value.Serialize();
         }
 
         // Empty colors are left out of saves
@@ -262,7 +266,7 @@ namespace SFS.Parts.Modules
 
             if (!disableColorSelect)
                 foreach (ColorTexture colorTexture in Base.partsLoader.colorTextures.Values)
-                    if (colorTexture.tags.Contains(skinTag) && !(DevSettings.NewSkinSystem && SkinLegacy.IsStockLegacy(colorTexture)))
+                    if (colorTexture.tags.Contains(skinTag) && !SkinLegacy.HiddenFromPicker(colorTexture))
                         output.Add(colorTexture);
 
             #if !UNITY_STANDALONE
