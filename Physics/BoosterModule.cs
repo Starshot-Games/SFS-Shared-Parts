@@ -258,13 +258,12 @@ namespace SFS.Parts.Modules
                     return;
                 }
             }
-
+        }
+        public override Vector2 GetThrustForce()
+        {
             // Force
-            Rigidbody2D rb2d = Rocket.rb2d;
-            Vector2 force_Local = thrustVector.Value * 9.8f;
-            Vector2 force = Base.worldBase.AllowsCheats ? transform.TransformVector(force_Local) : transform.TransformVectorUnscaled(force_Local);
-            Vector2 position = rb2d.GetRelativePoint(Transform_Utility.LocalToLocalPoint(transform, rb2d, thrustPosition.Value));
-            rb2d.AddForceAtPosition(force, position, ForceMode2D.Force);
+            Vector2 force_Local = thrustVector.Value * (9.8f * throttle_Out.Value);
+            return Base.worldBase.AllowsCheats ? transform.TransformVector(force_Local) : transform.TransformVectorUnscaled(force_Local);
         }
 
         // Implementation

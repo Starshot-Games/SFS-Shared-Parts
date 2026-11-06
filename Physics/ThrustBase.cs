@@ -16,7 +16,9 @@ namespace SFS.Parts.Modules
         
         public abstract Float_Reference ThrottleOut { get; }
         public abstract Bool_Reference On { get; }
-        
+
+        public abstract Vector2 GetThrustForce(); // World space, throttle applied
+
         public Rocket Rocket { get; set; }
     }
 }

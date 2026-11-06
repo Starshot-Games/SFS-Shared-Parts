@@ -174,11 +174,15 @@ namespace SFS.Parts.Modules
                 if (IsPlayer)
                     Logger.Log(Loc.main.Cannot_Use_Vacuum_Engines_In_Atmosphere);
             }
+        }
+        public override Vector2 GetThrustForce()
+        {
             // Force
             Vector2 force_Local = thrustNormal.Value * (thrust.Value * 9.8f * throttle_Out.Value);
             Vector2 force = Base.worldBase.AllowsCheats? transform.TransformVector(force_Local) : transform.TransformVectorUnscaled(force_Local);
 
             Check(ref force);
+            return force;
         }
 
 
