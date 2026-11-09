@@ -21,6 +21,8 @@ namespace SFS.Parts.Modules
         float mX, mY;
         void Start()
         {
+            OnValidate();
+            
             float x = splitAxis? randomizationStrengthX : randomizationStrength;
             float y = splitAxis? randomizationStrengthY : randomizationStrength;
             mX = 1 / (1 + x / 2);
