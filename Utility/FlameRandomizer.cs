@@ -31,8 +31,11 @@ namespace SFS.Parts.Modules
         
         void Update()
         {
-            if (Time.timeScale > 0)
+            if (Time.timeScale > 0 && gameObject.activeInHierarchy)
             {
+                var scale = (Vector2)transform.lossyScale;
+                if (scale.x == 0 || scale.y == 0) return;
+                
                 float x = splitAxis? randomizationStrengthX : randomizationStrength;
                 float y = splitAxis? randomizationStrengthY : randomizationStrength;
                 transform.localScale = Application.isPlaying ? new Vector3(size.x * (1.0f + Random.value * x) * mX, size.y * (1.0f + Random.value * y) * mY, 1) : size;

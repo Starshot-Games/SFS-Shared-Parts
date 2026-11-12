@@ -21,6 +21,9 @@ namespace SFS.Parts.Modules
         
         // in case some engine needs a non-linear response curve
         public AnimationCurve heatboxSizeCurve = AnimationCurve.Linear(0, 0, 1, 1);
+
+        private readonly static AnimationCurve defaultCurve = AnimationCurve.Linear(0, 0, 1, 1);
+        
         public Double_Reference sizePercent;
         public Bool_Reference enableHeat;
 
@@ -45,10 +48,18 @@ namespace SFS.Parts.Modules
         private static bool cacheInitialized;
         private static Dictionary<Collider2D, (HeatModuleBase hmb, bool isNull)> cache = new();
         private static int partsLayerMask;
+        private static bool gameManagerIsNull = true;
+        private static int updateFrameIndex;
         
         void FixedUpdate()
         {
-            if (GameManager.main == null) return;
+            if (Time.frameCount > updateFrameIndex)
+            {
+                gameManagerIsNull = GameManager.main == null;
+                updateFrameIndex = Time.frameCount;
+            }
+
+            if (gameManagerIsNull) return;
 
             if (!Calculate(out _, out var center, out var globSize, out var angle)) return;
             
@@ -110,7 +121,7 @@ namespace SFS.Parts.Modules
             globalSize = Vector2.zero;
             angle = 0f;
             
-            float effectiveThrottle = heatboxSizeCurve.Evaluate((float)sizePercent.Value);
+            float effectiveThrottle = heatboxSizeCurve.Equals(defaultCurve) ? (float)sizePercent.Value : heatboxSizeCurve.Evaluate((float)sizePercent.Value);
             if (effectiveThrottle == 0f || !enableHeat.Value) return false; // return false when the heatbox shouldn't be there at all
             
             Vector2 localSize = new Vector2(size.x, size.y * effectiveThrottle);

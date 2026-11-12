@@ -45,6 +45,8 @@ namespace SFS.Parts.Modules
 
 
         void Start() => Clear();
+
+        private bool offLock;
         
         void Update()
         {
@@ -56,7 +58,9 @@ namespace SFS.Parts.Modules
             }
             #endif
 
-            if (GameManager.main == null)
+            offLock &= throttle == 0;
+            
+            if (offLock || GameManager.main == null)
                 return;
                 
             float atmospherePressure = GetAtmospherePressure();
@@ -78,6 +82,8 @@ namespace SFS.Parts.Modules
             nozzleGlow.Value = Mathf.MoveTowards(nozzleGlow.Value, throttle, glowDelta);
             foreach (NozzleGlow n in nozzleGlows)
                 n.Apply(nozzleGlow.Value);
+
+            offLock |= throttle == 0;
         }
 
         // Real ambient pressure at the craft, from the planet's own atmosphere model, normalised so

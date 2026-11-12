@@ -36,26 +36,18 @@ namespace SFS.Parts.Modules
         MeshRenderer GetRenderer() => meshRendererCache != null? meshRendererCache : meshRendererCache = this.GetOrAddComponent<MeshRenderer>();
         MeshFilter GetFilter() => meshFilterCache != null? meshFilterCache : meshFilterCache = this.GetOrAddComponent<MeshFilter>();
 
+        // Meshes with identical data are shared between renderers in play mode
+        static readonly Dictionary<Hash128, CachedMesh> meshCache = new Dictionary<Hash128, CachedMesh>();
+        class CachedMesh { public Mesh mesh; public int users; }
+        Hash128 cacheKey;
+        bool usesCachedMesh;
+
         // Creates a mesh based on the specified values
         protected void ApplyMeshData(List<Vector3> vertices, int[] indices, List<Vector3>[] UVs, List<Color> colors, List<Vector3> shading, List<Vector3> depths, float baseDepth, float depthMultiplier, List<PartTex> textures, MeshTopology topology)
         {
             // Refs
-            Mesh mesh = GetMesh();
             Renderer meshRenderer = GetRenderer();
 
-            // Vertices
-            mesh.SetVertices(vertices);
-
-            // UVs
-            for (int channel_Index = 0; channel_Index < UVs.Length; channel_Index++)
-                mesh.SetUVs(channel_Index, UVs[channel_Index]);
-
-            // Color
-            mesh.SetColors(colors);
-
-            // Shading
-            mesh.SetUVs(5, shading);
-            
             // Depth
             if (RenderSortingManager.main != null)
             {
@@ -67,73 +59,63 @@ namespace SFS.Parts.Modules
                 baseDepth = 0.5f + baseDepth * DepthScale;
                 depthMultiplier *= DepthScale;
             }
-            //
-            mesh.SetUVs(3, depths);
-
             appliedBaseDepth = baseDepth;
             appliedDepthMultiplier = depthMultiplier;
 
-            // Indices, materials, property blocks
+            // Submeshes, one per texture
+            List<List<int>> submeshIndices = new List<List<int>>();
+            List<PartTex> submeshTextures = new List<PartTex>();
             if (textures.Count > 1)
-                Set_TrySubmeshes();
-            else
-                Set_Basic();
-
-            void Set_TrySubmeshes()
             {
                 Dictionary<PartTex, List<int>> submeshes = new Dictionary<PartTex, List<int>>();
                 for (int i = 0; i < textures.Count; i++)
                 {
-                    PartTex A = textures[i];
-                    if (!submeshes.ContainsKey(A))
-                        submeshes.Add(A, new List<int>());
-                    
-                    submeshes[A].Add(i);
-                }
-                
-                int submeshCount = submeshes.Count;
-
-                if (submeshCount > 1)
-                    Set_Multiple(submeshes);
-                else
-                    Set_Basic();
-            }
-            void Set_Multiple(Dictionary<PartTex, List<int>> submeshes)
-            {
-                SetMaterials(submeshes.Count);
-                mesh.subMeshCount = submeshes.Count;
-                appliedTextures = new PartTex[submeshes.Count];
-
-                int submeshIndex = 0;
-                foreach (List<int> pointers in submeshes.Values)
-                {
-                    // Indices
-                    List<int> list = new List<int>(pointers.Count * 4);
-                    foreach (int pointer in pointers)
+                    if (!submeshes.TryGetValue(textures[i], out List<int> list))
                     {
-                        list.Add(indices[pointer * 4]);
-                        list.Add(indices[pointer * 4 + 1]);
-                        list.Add(indices[pointer * 4 + 2]);
-                        list.Add(indices[pointer * 4 + 3]);
+                        submeshes.Add(textures[i], list = new List<int>());
+                        submeshIndices.Add(list);
+                        submeshTextures.Add(textures[i]);
                     }
-                    
-                    // Indices // Property block
-                    appliedTextures[submeshIndex] = textures[pointers[0]];
-                    ApplyPropertyBlock(meshRenderer, textures[pointers[0]], submeshIndex);
-                    mesh.SetIndices(list, topology, submeshIndex);
-                    submeshIndex++;
+
+                    list.Add(indices[i * 4]);
+                    list.Add(indices[i * 4 + 1]);
+                    list.Add(indices[i * 4 + 2]);
+                    list.Add(indices[i * 4 + 3]);
                 }
             }
-            void Set_Basic()
+            if (submeshIndices.Count <= 1)
             {
-                mesh.SetIndices(indices, topology, 0);
-                SetMaterials(1);
-
-                // Property block
-                appliedTextures = textures.Count > 0? new[] { textures[0] } : new PartTex[0];
+                submeshIndices.Clear();
+                submeshIndices.Add(new List<int>(indices));
+                submeshTextures.Clear();
                 if (textures.Count > 0)
-                    ApplyPropertyBlock(meshRenderer, textures[0], 0);
+                    submeshTextures.Add(textures[0]);
             }
+
+            // Mesh
+            Mesh mesh = GetMesh(GetMeshKey(vertices, UVs, colors, shading, depths, submeshIndices, topology), out bool needsData);
+            if (needsData)
+            {
+                mesh.SetVertices(vertices);
+                for (int channel_Index = 0; channel_Index < UVs.Length; channel_Index++)
+                    mesh.SetUVs(channel_Index, UVs[channel_Index]);
+                mesh.SetColors(colors);
+                mesh.SetUVs(5, shading);
+                mesh.SetUVs(3, depths);
+
+                mesh.subMeshCount = submeshIndices.Count;
+                for (int i = 0; i < submeshIndices.Count; i++)
+                    mesh.SetIndices(submeshIndices[i], topology, i);
+
+                mesh.RecalculateBounds();
+            }
+
+            // Materials, property blocks
+            SetMaterials(submeshIndices.Count);
+            appliedTextures = submeshTextures.ToArray();
+            for (int i = 0; i < appliedTextures.Length; i++)
+                ApplyPropertyBlock(meshRenderer, appliedTextures[i], i);
+
             void SetMaterials(int count)
             {
                 Material material = null;
@@ -160,10 +142,28 @@ namespace SFS.Parts.Modules
 
                 meshRenderer.sharedMaterials = appliedMaterials;
             }
+        }
+        static Hash128 GetMeshKey(List<Vector3> vertices, List<Vector3>[] UVs, List<Color> colors, List<Vector3> shading, List<Vector3> depths, List<List<int>> submeshIndices, MeshTopology topology)
+        {
+            Hash128 hash = new Hash128();
+            hash.Append((int)topology);
+            Add(vertices);
+            hash.Append(UVs.Length);
+            foreach (List<Vector3> uv in UVs)
+                Add(uv);
+            Add(colors);
+            Add(shading);
+            Add(depths);
+            hash.Append(submeshIndices.Count);
+            foreach (List<int> submesh in submeshIndices)
+                Add(submesh);
+            return hash;
 
-
-            // Applies new mesh data
-            mesh.RecalculateBounds();
+            void Add<T>(List<T> list) where T : unmanaged
+            {
+                hash.Append(list.Count);
+                hash.Append(list);
+            }
         }
         void ApplyPropertyBlock(Renderer meshRenderer, PartTex T, int index)
         {
@@ -200,17 +200,75 @@ namespace SFS.Parts.Modules
                 ApplyPropertyBlock(meshRenderer, appliedTextures[i], i);
         }
 
-        // Gets mesh component or adds it if it doesn't exist
-        Mesh GetMesh()
+        // Uses the cached mesh for this data if there is one, otherwise returns a mesh that needs the data set
+        Mesh GetMesh(Hash128 key, out bool needsData)
         {
             MeshFilter meshFilter = GetFilter();
+            needsData = true;
 
-            if (meshFilter.sharedMesh == null || !Application.isPlaying)
-                meshFilter.sharedMesh = meshReference = new Mesh { name = "BaseMesh" };
+            if (!Application.isPlaying)
+            {
+                if (usesCachedMesh)
+                    DestroyMesh(ReleaseMesh());
+                return meshFilter.sharedMesh = meshReference = new Mesh { name = "BaseMesh" };
+            }
+
+            Mesh unused = null;
+            if (meshCache.TryGetValue(key, out CachedMesh cached) && cached.mesh != null)
+            {
+                cached.users++;
+                unused = ReleaseMesh();
+                needsData = false;
+            }
             else
-                meshFilter.sharedMesh.Clear();
+            {
+                Mesh mesh = ReleaseMesh();
+                if (mesh != null)
+                    mesh.Clear();
+                else
+                    mesh = new Mesh { name = "BaseMesh" };
 
-            return meshFilter.sharedMesh;
+                cached = meshCache[key] = new CachedMesh { mesh = mesh, users = 1 };
+            }
+
+            cacheKey = key;
+            usesCachedMesh = true;
+            meshFilter.sharedMesh = meshReference = cached.mesh;
+            DestroyMesh(unused);
+            return cached.mesh;
+        }
+
+        // Stops using the current mesh, returns it if nothing else uses it
+        Mesh ReleaseMesh()
+        {
+            Mesh mesh = meshReference;
+            meshReference = null;
+
+            if (usesCachedMesh)
+            {
+                usesCachedMesh = false;
+                if (meshCache.TryGetValue(cacheKey, out CachedMesh cached) && cached.mesh == mesh)
+                {
+                    if (--cached.users > 0)
+                        return null;
+                    meshCache.Remove(cacheKey);
+                }
+            }
+
+            return mesh;
+        }
+
+        // Gives this renderer its own copy of a shared mesh, for per part vertex data like burn marks
+        public Mesh GetUniqueMesh()
+        {
+            if (usesCachedMesh)
+            {
+                Mesh shared = meshReference;
+                Mesh own = ReleaseMesh();
+                GetFilter().sharedMesh = meshReference = own != null? own : Instantiate(shared);
+            }
+
+            return GetFilter().sharedMesh;
         }
 
         // Changes depth layer and re-generates mesh
@@ -227,11 +285,18 @@ namespace SFS.Parts.Modules
         // Clears memory
         Mesh meshReference;
 
+        void OnDestroy() => DestroyMesh(ReleaseMesh());
+
+        static void DestroyMesh(Mesh mesh)
+        {
+            if (mesh == null)
+                return;
 #if UNITY_EDITOR
-        void OnDestroy() => DestroyImmediate(meshReference);
+            DestroyImmediate(mesh);
 #else
-        void OnDestroy() => Destroy(meshReference);
+            Destroy(mesh);
 #endif
+        }
 
         // Auto regenerate mesh
         #if UNITY_EDITOR

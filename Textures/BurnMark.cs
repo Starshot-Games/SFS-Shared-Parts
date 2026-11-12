@@ -157,12 +157,15 @@ namespace SFS.Parts.Modules
             for (int meshIndex = 0; meshIndex < meshReferences.Length; meshIndex++)
             {
                 MeshReference meshReference = meshReferences[meshIndex];
+                if (meshReference.baseMesh == null)
+                    continue;
+
                 Vector2[] vertices = rotatedVertices[meshIndex];
                 
                 Vector3[] uvs = new Vector3[vertices.Length];
                 for (int i = 0; i < vertices.Length; i++)
                     uvs[i] = new Vector3((burn.x + vertices[i].x) / textureWidth, vertices[i].y - bounds.yMin, Mathf.InverseLerp(bounds.xMin, bounds.xMax, vertices[i].x));
-                meshReference.filter.sharedMesh.SetUVs(4, uvs);
+                meshReference.baseMesh.GetUniqueMesh().SetUVs(4, uvs);
             }
         }
 
@@ -238,15 +241,20 @@ namespace SFS.Parts.Modules
         void SetPropertyBlock(Action<MaterialPropertyBlock> setData)
         {
             foreach (MeshReference meshReference in meshReferences)
-                for (int i = 0; i < meshReference.renderer.materials.Length; i++)
+            {
+                if (meshReference.baseMesh == null)
+                    continue;
+
+                for (int i = 0; i < meshReference.renderer.sharedMaterials.Length; i++)
                 {
                     MaterialPropertyBlock propertyBlock = new MaterialPropertyBlock();
                     if (meshReference.renderer.HasPropertyBlock())
                         meshReference.renderer.GetPropertyBlock(propertyBlock, i);
-                
+
                     setData.Invoke(propertyBlock);
                     meshReference.renderer.SetPropertyBlock(propertyBlock, i);
                 }
+            }
         }
         
 
@@ -374,11 +382,13 @@ namespace SFS.Parts.Modules
         {
             public MeshRenderer renderer;
             public MeshFilter filter;
+            public BaseMesh baseMesh;
 
             public MeshReference(MeshRenderer renderer, MeshFilter filter)
             {
                 this.renderer = renderer;
                 this.filter = filter;
+                baseMesh = renderer.GetComponent<BaseMesh>();
             }
         }
 
