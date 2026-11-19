@@ -16,7 +16,12 @@ namespace SFS.Parts.Modules
         static readonly int PuffSize = Shader.PropertyToID("_PuffSize");
         static readonly int Sun = Shader.PropertyToID("_Sun");
         static readonly int Accumulated = Shader.PropertyToID("_SmokeAccumulated");
+        static readonly int Airborne = Shader.PropertyToID("_SmokeAirborne");
+        static readonly int AirborneLayer = Shader.PropertyToID("_Airborne");
         const int AccumulatePass = 1; // of the trail shader; pass 0 draws straight onto the screen
+        const int AccumulateSplitPass = 2; // and pass 2 into two textures, the smoke still in the air apart from what the ground has turned aside
+        const int AirborneQueue = 2995; // the flames': smoke not yet down on the ground goes behind the launch pad (2996) and the parts with them
+        const float GroundShowTime = 0.4f; // s smoke the ground has turned aside takes to come out in front of the pad
 
         const float MinDepth = 0.002f; // segments fainter than this are left out
         const float QuadWidth = 1.5f;  // of the radius, leaving room for the shader's ragged edges
@@ -87,6 +92,7 @@ namespace SFS.Parts.Modules
         readonly List<Vector4> speeds = new();
         readonly List<Vector2> cones = new();
         readonly List<Vector2> ends = new();
+        readonly List<Vector2> grounds = new();
         float puffSize;
         readonly List<int> indices = new();
 
@@ -141,8 +147,10 @@ namespace SFS.Parts.Modules
             static readonly List<SmokeTrails> renderers = new();
             static CommandBuffer buffer;
             static Camera attached;
-            static MeshRenderer quad;
-            static Material material;
+            static MeshRenderer quad, airborneQuad;
+            static Material material, airborneMaterial;
+            static bool? split;
+            static readonly RenderTargetIdentifier[] targets = new RenderTargetIdentifier[2];
             static Texture2D none;
             static bool? available;
 
@@ -168,26 +176,51 @@ namespace SFS.Parts.Modules
 
             public static void Remove(SmokeTrails renderer) => renderers.Remove(renderer);
 
+            // Whether the smoke still in the air can be kept apart from what's down on the ground, in a second texture alongside
+            static bool Split => split ??= SystemInfo.supportedRenderTargetCount >= 2;
+
             static MeshRenderer Quad
             {
                 get
                 {
-                    if (quad != null)
-                        return quad;
-
-                    // Its corners are clip-space, and its bounds reach far enough that it's never culled
-                    Mesh mesh = new() { name = "Smoke Composite" };
-                    mesh.SetVertices(new[] { new Vector3(-1, -1), new Vector3(1, -1), new Vector3(1, 1), new Vector3(-1, 1) });
-                    mesh.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0, false);
-                    mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1e9f);
-
-                    GameObject gameObject = new("Smoke Composite");
-                    gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
-                    if (material == null)
-                        material = new Material(UnityEngine.Resources.Load<Shader>("Effects/SmokeComposite"));
-                    quad = SetupRenderer(gameObject, material);
+                    if (quad == null)
+                        quad = CreateQuad("Smoke Composite", ref material, false);
                     return quad;
                 }
+            }
+
+            // The smoke not yet down on the ground, drawn with the flames, so it goes behind the launch pad and the parts
+            static MeshRenderer AirborneQuad
+            {
+                get
+                {
+                    if (airborneQuad != null)
+                        return airborneQuad;
+
+                    airborneQuad = CreateQuad("Smoke Composite (Airborne)", ref airborneMaterial, true);
+                    airborneQuad.sortingOrder = 0;
+                    airborneQuad.transform.position = new Vector3(0, 0, -1); // nearer than the flames, so drawn after them in their queue
+                    airborneMaterial.renderQueue = AirborneQueue;
+                    return airborneQuad;
+                }
+            }
+
+            static MeshRenderer CreateQuad(string name, ref Material quadMaterial, bool airborne)
+            {
+                // Its corners are clip-space, and its bounds reach far enough that it's never culled
+                Mesh mesh = new() { name = name };
+                mesh.SetVertices(new[] { new Vector3(-1, -1), new Vector3(1, -1), new Vector3(1, 1), new Vector3(-1, 1) });
+                mesh.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0, false);
+                mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1e9f);
+
+                GameObject gameObject = new(name);
+                gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                if (quadMaterial == null)
+                {
+                    quadMaterial = new Material(UnityEngine.Resources.Load<Shader>("Effects/SmokeComposite"));
+                    quadMaterial.SetFloat(AirborneLayer, airborne ? 1 : 0);
+                }
+                return SetupRenderer(gameObject, quadMaterial);
             }
 
             static Texture2D None
@@ -210,6 +243,7 @@ namespace SFS.Parts.Modules
                 if (camera != world || world == null)
                 {
                     Shader.SetGlobalTexture(Accumulated, None);
+                    Shader.SetGlobalTexture(Airborne, None);
                     return;
                 }
 
@@ -227,16 +261,27 @@ namespace SFS.Parts.Modules
 
                 buffer.Clear();
                 Quad.enabled = any;
+                AirborneQuad.enabled = any && Split;
                 if (!any)
                     return;
 
                 buffer.GetTemporaryRT(Accumulated, -1, -1, 0, FilterMode.Point, RenderTextureFormat.ARGBHalf);
-                buffer.SetRenderTarget(Accumulated);
+                if (Split)
+                {
+                    buffer.GetTemporaryRT(Airborne, -1, -1, 0, FilterMode.Point, RenderTextureFormat.ARGBHalf);
+                    targets[0] = Airborne;
+                    targets[1] = Accumulated;
+                    buffer.SetRenderTarget(targets, targets[0]);
+                }
+                else
+                    buffer.SetRenderTarget(Accumulated);
                 buffer.ClearRenderTarget(false, true, Color.clear);
                 foreach (SmokeTrails renderer in renderers)
                     if (renderer != null && renderer.HasSmoke)
-                        buffer.DrawMesh(renderer.mesh, renderer.transform.localToWorldMatrix, renderer.material, 0, AccumulatePass, renderer.propertyBlock);
+                        buffer.DrawMesh(renderer.mesh, renderer.transform.localToWorldMatrix, renderer.material, 0, Split ? AccumulateSplitPass : AccumulatePass, renderer.propertyBlock);
                 buffer.SetGlobalTexture(Accumulated, Accumulated);
+                if (Split)
+                    buffer.SetGlobalTexture(Airborne, Airborne);
                 buffer.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             }
         }
@@ -318,6 +363,7 @@ namespace SFS.Parts.Modules
             speeds.Clear();
             cones.Clear();
             ends.Clear();
+            grounds.Clear();
             indices.Clear();
 
             anchor = WorldView.main.positionOffset.Value;
@@ -348,6 +394,7 @@ namespace SFS.Parts.Modules
             mesh.SetUVs(4, ends);
             mesh.SetUVs(5, speeds);
             mesh.SetUVs(6, cones);
+            mesh.SetUVs(7, grounds);
             mesh.SetTriangles(indices, 0, false);
             mesh.RecalculateBounds();
 
@@ -469,6 +516,7 @@ namespace SFS.Parts.Modules
                 speeds.Add(new Vector4(newer.speed, older.speed, distortion));
                 cones.Add(cone);
                 ends.Add(open);
+                grounds.Add(new Vector2(newer.ground, older.ground));
             }
 
             indices.Add(start);
@@ -491,6 +539,7 @@ namespace SFS.Parts.Modules
             public readonly float speed;
             public readonly float random;
             public readonly bool grounded;
+            public readonly float ground; // how far it has come out in front of the launch pad, once the ground has turned it aside
 
             public Node(in SmokeTrail.Point point, Double2 anchor, double now, float keepVisible)
             {
@@ -499,6 +548,7 @@ namespace SFS.Parts.Modules
                 speed = point.velocity.magnitude;
                 random = point.random;
                 grounded = point.grounded;
+                ground = point.grounded ? Mathf.Clamp01(point.groundedFor / GroundShowTime) : 0;
                 radius = point.GetRadius(now);
                 fade = point.GetFade(now);
                 mass = point.mass * Mathf.Pow(radius / Mathf.Max(point.GetSwollenRadius(now), 1e-4f), keepVisible);
@@ -539,6 +589,7 @@ namespace SFS.Parts.Modules
             public float along;      // m down the flame from the nozzle, while held
             public float hidden;     // how much of it doesn't show yet when let go: in thin air it only shows as it puffs out
             public bool grounded;    // the ground has turned it aside
+            public float groundedFor; // s since, while that matters to SmokeTrails
 
             public float GetRadius(double now)
             {
@@ -682,6 +733,12 @@ namespace SFS.Parts.Modules
             for (int i = 0; i < points.Count; i++)
             {
                 Point point = points[i];
+                if (point.grounded && point.groundedFor < 1)
+                {
+                    point.groundedFor += deltaTime;
+                    points[i] = point;
+                }
+
                 float speed = point.velocity.magnitude;
                 if (point.held || !(speed > MinSpeed))
                     continue;

@@ -46,10 +46,40 @@ namespace SFS.Parts.Modules
             AirSpreadProperty = Shader.PropertyToID("airSpread"),
             SmokeCoverProperty = Shader.PropertyToID("smokeCover"),
             MergeColor = Shader.PropertyToID("mergeColor"),
+            MergeCoreColor = Shader.PropertyToID("mergeCoreColor"),
+            MergeTailColor = Shader.PropertyToID("mergeTailColor"),
+            MergeOuterColor = Shader.PropertyToID("mergeOuterColor"),
+            MergeOuterWidth = Shader.PropertyToID("mergeOuterWidth"),
+            MergeEdgeSoftness = Shader.PropertyToID("mergeEdgeSoftness"),
+            MergeEdgeBalance = Shader.PropertyToID("mergeEdgeBalance"),
+            OuterColorProperty = Shader.PropertyToID("_OuterColor"),
+            OuterWidthProperty = Shader.PropertyToID("_OuterWidth"),
+            EdgeSoftnessProperty = Shader.PropertyToID("_EdgeSoftness"),
+            EdgeBalanceProperty = Shader.PropertyToID("_EdgeBalance"),
             MergeAdditiveBlend = Shader.PropertyToID("mergeAdditiveBlend"),
             MergeStripesWidth = Shader.PropertyToID("mergeStripesWidth"),
             MergeStripesStrength = Shader.PropertyToID("mergeStripesStrength"),
             MergeSoot = Shader.PropertyToID("mergeSoot"),
+            ExposureProperty = Shader.PropertyToID("_Exposure"),
+            CoreLengthProperty = Shader.PropertyToID("_CoreLength"),
+            MixedLightProperty = Shader.PropertyToID("_MixedLight"),
+            EdgeLightProperty = Shader.PropertyToID("_EdgeLight"),
+            OpacityProperty = Shader.PropertyToID("_Opacity"),
+            OpaqueExposureProperty = Shader.PropertyToID("_OpaqueExposure"),
+            MergeOpaqueExposure = Shader.PropertyToID("mergeOpaqueExposure"),
+            SkyHoldProperty = Shader.PropertyToID("_SkyHold"),
+            MergeSkyHold = Shader.PropertyToID("mergeSkyHold"),
+            MergeOpacity = Shader.PropertyToID("mergeOpacity"),
+            MergeExposure = Shader.PropertyToID("mergeExposure"),
+            MergeCoreLength = Shader.PropertyToID("mergeCoreLength"),
+            CoreWidthProperty = Shader.PropertyToID("_CoreWidth"),
+            MergeCoreWidth = Shader.PropertyToID("mergeCoreWidth"),
+            ColorSoftnessProperty = Shader.PropertyToID("_ColorSoftness"),
+            MergeColorSoftness = Shader.PropertyToID("mergeColorSoftness"),
+            TailColorShiftProperty = Shader.PropertyToID("_TailColorShift"),
+            MergeTailColorShift = Shader.PropertyToID("mergeTailColorShift"),
+            MergeMixedLight = Shader.PropertyToID("mergeMixedLight"),
+            MergeEdgeLight = Shader.PropertyToID("mergeEdgeLight"),
             NeighbourSoot = Shader.PropertyToID("neighbourSoot"),
             MergeTurbulence = Shader.PropertyToID("mergeTurbulence"),
             MergeMirror = Shader.PropertyToID("mergeMirror"),
@@ -66,7 +96,11 @@ namespace SFS.Parts.Modules
             GlareFlow = Shader.PropertyToID("glareFlow"),
             DiamondOffsetProperty = Shader.PropertyToID("diamondOffset"),
             FlameColorProperty = Shader.PropertyToID("_FlameColor"),
-            FlameMaskProperty = Shader.PropertyToID("_FlameMask");
+            TailColorProperty = Shader.PropertyToID("_TailColor"),
+            CoreColorProperty = Shader.PropertyToID("_CoreColor"),
+            CoreBlendProperty = Shader.PropertyToID("_CoreBlend"),
+            FlameMaskProperty = Shader.PropertyToID("_FlameMask"),
+            FlickerProperty = Shader.PropertyToID("flameFlicker");
         
         
         // Debug preview - refreshes on validate. EngineEffects drives this at runtime.
@@ -86,10 +120,15 @@ namespace SFS.Parts.Modules
         [Space]
         public float stripesWidth = 1;
         [Range(0, 3)] public float stripesStrength = 1;
+        [Tooltip("Whether this flame streaks the material's soot near the nozzle")]
+        public bool sootStreaks = true;
 
         // How much light this flame gives off next to other engines'.
         [Space]
         [Range(0, 1)] public float mergeLuminosity = 1;
+
+        [Tooltip("How much the plume's brightness flickers")]
+        [Range(0, 0.5f)] public float flicker = 0.05f;
 
         // Plume merging. The solver reads these off every live flame and writes back the slice of
         // the shared plume this one draws, and the far brighter plumes around that drown it out
@@ -148,6 +187,66 @@ namespace SFS.Parts.Modules
             }
         }
 
+        // And down its tail
+        Color? tailColor;
+        public Color TailColor
+        {
+            get
+            {
+                if (tailColor == null)
+                {
+                    Material material = GetPlumeMaterial(TailColorProperty);
+                    tailColor = material != null ? material.GetColor(TailColorProperty) : FlameColor;
+                }
+
+                return tailColor.Value;
+            }
+        }
+        // And out at its edges, how far in that reaches, and how far in its outline softens
+        Color? outerColor;
+        public Color OuterColor
+        {
+            get
+            {
+                if (outerColor == null)
+                {
+                    Material material = GetPlumeMaterial(OuterColorProperty);
+                    outerColor = material != null ? material.GetColor(OuterColorProperty) : FlameColor;
+                }
+
+                return outerColor.Value;
+            }
+        }
+        float? outerWidth, edgeSoftness, edgeBalance;
+        public float OuterWidth => outerWidth ??= GetMaterialFloat(OuterWidthProperty, 0.4f);
+        public float EdgeSoftness => edgeSoftness ??= GetMaterialFloat(EdgeSoftnessProperty, 0);
+        public float EdgeBalance => edgeBalance ??= GetMaterialFloat(EdgeBalanceProperty, 0.5f);
+
+        float? tailColorShift;
+        public float TailColorShift => tailColorShift ??= GetMaterialFloat(TailColorShiftProperty, 0);
+
+        // And the colour down its core, and how far it takes it there
+        Color? coreColor;
+        public Color CoreColor
+        {
+            get
+            {
+                if (coreColor == null)
+                {
+                    Material material = GetPlumeMaterial(CoreColorProperty);
+                    coreColor = material != null ? material.GetColor(CoreColorProperty) : Color.white;
+                }
+
+                return coreColor.Value;
+            }
+        }
+        float? coreBlend;
+        public float CoreBlend => coreBlend ??= GetMaterialFloat(CoreBlendProperty, 0);
+        float? coreWidth;
+        public float CoreWidth => coreWidth ??= GetMaterialFloat(CoreWidthProperty, 0.7f);
+        float? colorSoftness;
+        public float ColorSoftness => colorSoftness ??= GetMaterialFloat(ColorSoftnessProperty, 0.5f);
+
         // And how turbulent it gets, in air and in vacuum
         Vector2? turbulence;
         public Vector2 Turbulence
@@ -176,13 +275,52 @@ namespace SFS.Parts.Modules
                     soot = material != null ? material.GetFloat(SootProperty) : 0;
                 }
 
-                return soot.Value;
+                return sootStreaks ? soot.Value : 0;
             }
+        }
+
+        // And how brightly it is seen in air, and how its light falls off past its potential core and out to its edges there (GetMixedLight in the shader)
+        float? exposure, coreLength, mixedLight, edgeLight, opacity, opaqueExposure, skyHold;
+        public float Exposure => exposure ??= GetMaterialFloat(ExposureProperty, 1);
+        public float CoreLength => coreLength ??= GetMaterialFloat(CoreLengthProperty, 0.35f);
+        public float MixedLight => mixedLight ??= GetMaterialFloat(MixedLightProperty, 1);
+        public float EdgeLight => edgeLight ??= GetMaterialFloat(EdgeLightProperty, 1);
+        public float Opacity => opacity ??= GetMaterialFloat(OpacityProperty, 1);
+        public float OpaqueExposure => opaqueExposure ??= GetMaterialFloat(OpaqueExposureProperty, 1);
+        public float SkyHold => skyHold ??= GetMaterialFloat(SkyHoldProperty, 0);
+
+        float GetMaterialFloat(int property, float fallback)
+        {
+            Material material = GetPlumeMaterial(property);
+            return material != null ? material.GetFloat(property) : fallback;
+        }
+
+        // GetMixedLight in the shader
+        float GetMixedLight(float meshY, float end, float core, float coreLength, float mixed, float edge)
+        {
+            float air = Mathf.Sqrt(Mathf.Clamp01(appliedAtmospherePressure));
+            float t = Mathf.Clamp01((meshY / Mathf.Max(end, 1e-4f) - coreLength * 0.5f) / Mathf.Max(coreLength, 1e-4f));
+            return Mathf.Lerp(1, mixed, t * t * (3 - 2 * t) * air) * Mathf.Lerp(1, edge, (1 - core) * air);
         }
 
         // Where in the turbulence pattern this flame sits, so engines side by side don't churn in step
         [NonSerialized] public float noiseSeed;
         void Awake() => noiseSeed = UnityEngine.Random.value;
+
+        // How the plume's brightness flickers now, about 1 at its spread; its glow flickers with it.
+        // A merged group flickers as one, or its slices would part at the joins.
+        public float FlickerNoise { get; private set; }
+        const float PlumeFlickerRate = 14, PlumeFlickerRateFine = 23; // noise tiles a second
+
+        void UpdateFlicker()
+        {
+            float seed = (merge.amount > 0 ? merge.seed : noiseSeed) * 100;
+            float time = Time.time;
+            FlickerNoise = Mathf.Clamp(0.6f * GetNoise(seed, time * PlumeFlickerRate) + 0.4f * GetNoise(seed + 31, time * PlumeFlickerRateFine), -1, 2);
+        }
+
+        // Mathf.PerlinNoise about its mean, at about 1 for its spread
+        public static float GetNoise(float x, float y) => (Mathf.PerlinNoise(x, y) - 0.5f) / 0.2f;
 
         // The turbulence streams down the plume as fast as the smoke leaves it, in nozzle half-widths a second
         const float DefaultEddySpeed = 144; // for a flame that leaves no smoke to take it from
@@ -285,6 +423,7 @@ namespace SFS.Parts.Modules
             }
             if (registered)
                 FlameMergeSolver.EnsureSolved();
+            UpdateFlicker();
 
             // Set
             foreach (MeshRef a in meshRenderers)
@@ -320,6 +459,8 @@ namespace SFS.Parts.Modules
                 
                 propertyBlock.SetFloat(StripesWidth, stripesWidth);
                 propertyBlock.SetFloat(StripesStrength, stripesStrength);
+                if (!sootStreaks)
+                    propertyBlock.SetFloat(SootProperty, 0);
 
                 // The far brighter plumes this flame is drowned out under (a depth of 0 = none there)
                 for (int i = 0; i < glareAxis.Length; i++)
@@ -367,14 +508,31 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetFloat(MergeThrottle, meshMerge.throttle);
                 propertyBlock.SetFloat(MergeAirSpread, meshMerge.airSpread);
                 propertyBlock.SetColor(MergeColor, meshMerge.color);
+                propertyBlock.SetColor(MergeCoreColor, meshMerge.coreColor);
+                propertyBlock.SetColor(MergeTailColor, meshMerge.tailColor);
+                propertyBlock.SetFloat(MergeTailColorShift, meshMerge.tailColorShift);
+                propertyBlock.SetColor(MergeOuterColor, meshMerge.outerColor);
+                propertyBlock.SetFloat(MergeOuterWidth, meshMerge.outerWidth);
+                propertyBlock.SetFloat(MergeEdgeSoftness, meshMerge.edgeSoftness);
+                propertyBlock.SetFloat(MergeEdgeBalance, meshMerge.edgeBalance);
                 propertyBlock.SetFloat(MergeAdditiveBlend, meshMerge.additiveBlend);
                 propertyBlock.SetFloat(MergeStripesWidth, meshMerge.stripesWidth);
                 propertyBlock.SetFloat(MergeStripesStrength, meshMerge.stripesStrength);
                 propertyBlock.SetFloat(MergeSoot, meshMerge.soot);
+                propertyBlock.SetFloat(MergeExposure, meshMerge.exposure);
+                propertyBlock.SetFloat(MergeCoreLength, meshMerge.coreLength);
+                propertyBlock.SetFloat(MergeCoreWidth, meshMerge.coreWidth);
+                propertyBlock.SetFloat(MergeColorSoftness, meshMerge.colorSoftness);
+                propertyBlock.SetFloat(MergeMixedLight, meshMerge.mixedLight);
+                propertyBlock.SetFloat(MergeEdgeLight, meshMerge.edgeLight);
+                propertyBlock.SetFloat(MergeOpacity, meshMerge.opacity);
+                propertyBlock.SetFloat(MergeOpaqueExposure, meshMerge.opaqueExposure);
+                propertyBlock.SetFloat(MergeSkyHold, meshMerge.skyHold);
                 propertyBlock.SetVector(MergeTurbulence, meshMerge.turbulence);
                 propertyBlock.SetFloat(MergeMirror, meshMerge.mirror);
                 propertyBlock.SetFloat(MergeSeed, meshMerge.seed);
                 propertyBlock.SetFloat(NoiseSeed, noiseSeed);
+                propertyBlock.SetFloat(FlickerProperty, flicker * FlickerNoise);
 
                 propertyBlock.SetVector(EddyOffset, GetEddyOffset(GetEddyFlow(a.meshRenderer.transform), Time.timeAsDouble));
                 propertyBlock.SetVector(MergeEddyOffset, GetEddyOffset(meshMerge.eddyFlow, Time.timeAsDouble));
@@ -489,7 +647,9 @@ namespace SFS.Parts.Modules
             float breakup = Mathf.Lerp(1, puffs, Mathf.SmoothStep(0, 1, alongTail / 0.35f) * Mathf.Clamp01(churn));
 
             float lengthFade = Mathf.Clamp01(1 - tailY / end);
-            return Mathf.Pow(Mathf.Max(sample.widthRatio, 1e-4f), -1.6f) * lengthFade * mask * breakup;
+            bool merged = group && meshMerge.amount > 0;
+            float mixedLight = GetMixedLight(meshY, end, 1, merged ? meshMerge.coreLength : CoreLength, merged ? meshMerge.mixedLight : MixedLight, merged ? meshMerge.edgeLight : EdgeLight);
+            return Mathf.Pow(Mathf.Max(sample.widthRatio, 1e-4f), -1.6f) * lengthFade * mask * breakup * mixedLight;
         }
 
         // How far into the merge with its neighbours this flame is at meshY: 0 its own jet .. 1 wholly the group's plume, as the shader crossfades them
@@ -558,7 +718,7 @@ namespace SFS.Parts.Modules
 
         // The flame mask's alpha down the plume's middle, which the shader samples at 1 - v. It can't be read on the CPU, so it's read back once per texture.
         static readonly Dictionary<Texture, float[]> maskProfiles = new();
-        float[] maskProfile;
+        [NonSerialized] float[] maskProfile;
 
         float GetMaskAlong(float meshY)
         {
@@ -594,7 +754,10 @@ namespace SFS.Parts.Modules
             profile = new float[Samples];
             for (int i = 0; i < Samples; i++)
                 profile[i] = readback.GetPixel(0, i).a;
-            Destroy(readback);
+            if (Application.isPlaying)
+                Destroy(readback);
+            else
+                DestroyImmediate(readback);
 
             maskProfiles[mask] = profile;
             return profile;
@@ -665,6 +828,7 @@ namespace SFS.Parts.Modules
             }
 
             const float margin = 1.1f; // +10%
+            halfX *= 1 + Mathf.Max(GetEdgeCover(EdgeSoftness, EdgeBalance), GetEdgeCover(merge.edgeSoftness, merge.edgeBalance));
 
             Bounds result = new Bounds();
             result.SetMinMax(
@@ -672,6 +836,9 @@ namespace SFS.Parts.Modules
                 new Vector3(halfX * margin, reach * (margin - 1), halfZ * margin));
             return result;
         }
+
+        // Mirror of GetEdgeCover in the flame shader: how far past its outline a softened edge's mesh reaches, of its half-width
+        static float GetEdgeCover(float softness, float balance) => softness * balance + 0.1f * Mathf.Clamp01(softness * 10);
 
         // Mirror of GetPlumeShape in the flame shader, for the culling bounds above
         void GetPlumeShape(float meshY, bool machDiamondsMesh, FlameMerge merge, float throttle, float atmospherePressure, out float left, out float right, out float along)

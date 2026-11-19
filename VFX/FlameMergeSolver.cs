@@ -32,10 +32,26 @@ namespace SFS.Parts.Modules
         public float airSpread;
 
         public Color color;
+        public Color coreColor;
+        public Color tailColor;
+        public float tailColorShift;
+        public Color outerColor;
+        public float outerWidth;
+        public float edgeSoftness;
+        public float edgeBalance;
         public float additiveBlend;
         public float stripesWidth;
         public float stripesStrength;
         public float soot;
+        public float exposure;
+        public float coreLength;
+        public float coreWidth;
+        public float colorSoftness;
+        public float mixedLight;
+        public float edgeLight;
+        public float opacity;
+        public float opaqueExposure;
+        public float skyHold;
         public Vector2 turbulence; // in air and in vacuum
         public float mirror;       // -1 where this flame's x runs the other way across the group
         public float seed;
@@ -807,9 +823,11 @@ namespace SFS.Parts.Modules
             float referenceLength = lengthPerRadius * referenceRadius;
 
             // The group's combined look
-            Color color = default;
+            Color color = default, coreColor = default, tailColor = default;
+            float tailColorShift = 0, outerWidth = 0, edgeSoftness = 0, edgeBalance = 0, coreWidth = 0, colorSoftness = 0;
+            Color outerColor = default;
             Vector2 turbulence = default;
-            float additiveBlend = 0, stripesWidth = 0, stripesStrength = 0, soot = 0, eddySpeed = 0, light = 0;
+            float additiveBlend = 0, stripesWidth = 0, stripesStrength = 0, soot = 0, exposure = 0, coreLength = 0, mixedLight = 0, edgeLight = 0, opacity = 0, opaqueExposure = 0, skyHold = 0, eddySpeed = 0, light = 0;
 
             for (int k = 0; k < count; k++)
             {
@@ -818,20 +836,52 @@ namespace SFS.Parts.Modules
                 float share = flame.radius * flame.weight * flame.throttle * GetLuminosity(flame);
 
                 color += module.FlameColor * share;
+                coreColor += Color.LerpUnclamped(module.FlameColor, module.CoreColor, module.CoreBlend) * share;
+                tailColor += module.TailColor * share;
+                tailColorShift += module.TailColorShift * share;
+                outerColor += module.OuterColor * share;
+                outerWidth += module.OuterWidth * share;
+                edgeSoftness += module.EdgeSoftness * share;
+                edgeBalance += module.EdgeBalance * share;
                 additiveBlend += module.appliedAdditiveBlend * share;
                 stripesWidth += module.stripesWidth * share;
                 stripesStrength += module.stripesStrength * share;
                 soot += module.Soot * share;
+                exposure += module.Exposure * share;
+                coreLength += module.CoreLength * share;
+                coreWidth += module.CoreWidth * share;
+                colorSoftness += module.ColorSoftness * share;
+                mixedLight += module.MixedLight * share;
+                edgeLight += module.EdgeLight * share;
+                opacity += module.Opacity * share;
+                opaqueExposure += module.OpaqueExposure * share;
+                skyHold += module.SkyHold * share;
                 turbulence += module.Turbulence * share;
                 eddySpeed += module.EddySpeed * flame.radius * share;
                 light += share;
             }
 
             color /= light;
+            coreColor /= light;
+            tailColor /= light;
+            tailColorShift /= light;
+            outerColor /= light;
+            outerWidth /= light;
+            edgeSoftness /= light;
+            edgeBalance /= light;
             additiveBlend /= light;
             stripesWidth /= light;
             stripesStrength /= light;
             soot /= light;
+            exposure /= light;
+            coreLength /= light;
+            coreWidth /= light;
+            colorSoftness /= light;
+            mixedLight /= light;
+            edgeLight /= light;
+            opacity /= light;
+            opaqueExposure /= light;
+            skyHold /= light;
             turbulence /= light;
             eddySpeed /= light;
 
@@ -979,10 +1029,26 @@ namespace SFS.Parts.Modules
                     throttle = throttle,
                     airSpread = airSpread,
                     color = color,
+                    coreColor = coreColor,
+                    tailColor = tailColor,
+                    tailColorShift = tailColorShift,
+                    outerColor = outerColor,
+                    outerWidth = outerWidth,
+                    edgeSoftness = edgeSoftness,
+                    edgeBalance = edgeBalance,
                     additiveBlend = additiveBlend,
                     stripesWidth = stripesWidth,
                     stripesStrength = stripesStrength,
                     soot = soot,
+                    exposure = exposure,
+                    coreLength = coreLength,
+                    coreWidth = coreWidth,
+                    colorSoftness = colorSoftness,
+                    mixedLight = mixedLight,
+                    edgeLight = edgeLight,
+                    opacity = opacity,
+                    opaqueExposure = opaqueExposure,
+                    skyHold = skyHold,
                     turbulence = turbulence,
                     mirror = mirrored ? -1 : 1,
                     seed = flames[run[0]].module.noiseSeed,

@@ -104,9 +104,8 @@ namespace SFS.Parts.Modules
         void I_InitializePartModule.Initialize()
         {
             part = transform.GetComponentInParentTree<Part>();
+            boosterOn.Value = throttle_Out.Value > 0;
             enabled = boosterOn.Value;
-
-            enabled = fuelPercent.Value is < 1.0f and > 0.0f;
 
             throttle_Input.OnChange += TryIgnite;
 

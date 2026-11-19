@@ -58,7 +58,7 @@ namespace SFS.Parts.Modules
             }
             #endif
 
-            offLock &= throttle == 0;
+            offLock &= engineThrottle.Value == 0;
             
             if (offLock || GameManager.main == null)
                 return;
@@ -83,7 +83,7 @@ namespace SFS.Parts.Modules
             foreach (NozzleGlow n in nozzleGlows)
                 n.Apply(nozzleGlow.Value);
 
-            offLock |= throttle == 0;
+            offLock |= throttle == 0 && nozzleGlow.Value == 0;
         }
 
         // Real ambient pressure at the craft, from the planet's own atmosphere model, normalised so
