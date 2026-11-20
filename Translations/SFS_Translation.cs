@@ -833,7 +833,7 @@ namespace SFS
         public F Albatross_B4_Engine_Description => A(nameof(Albatross_B4_Engine_Description), "High-efficiency vacuum engine optimized for long-duration burns beyond atmospheres");
         public F Frontier_P2_Engine_Description => A(nameof(Frontier_P2_Engine_Description), "Powerful engine balancing thrust and efficiency, well suited for medium and heavy-lift vehicles");
         public F Martin_LM_Engine_Description => A(nameof(Martin_LM_Engine_Description), "Compact vacuum engine designed for precision maneuvers, landers, and orbital transfer stages");
-        public F Kolibri_LF9_Engine_Description => A(nameof(Kolibri_LF9_Engine_Description), "Lightweight vacuum engine with excellent efficiency, ideal for upper stages and orbital insertion burns");
+        public F Kolibri_RF9_Engine_Description => A(nameof(Kolibri_RF9_Engine_Description), "Lightweight vacuum engine with excellent efficiency, ideal for upper stages and orbital insertion burns");
         public F Sparrow_SX_Engine_Description => A(nameof(Sparrow_SX_Engine_Description), "Ultra-light engine designed for small launchers and attitude stages, low thrust but extremely compact");
         public F Sparrow_SP_Engine_Description => A(nameof(Sparrow_SP_Engine_Description), "Ultra-light side engine designed for small launchers and attitude stages, low thrust but extremely compact");
         public F Kinglet_K5_Engine_Description => A(nameof(Kinglet_K5_Engine_Description), "Compact engine optimized for lightweight first stages and subtle maneuvers");
