@@ -947,6 +947,7 @@ namespace SFS
         public F Part_Pick_Category_Heat_Protection => A(nameof(Part_Pick_Category_Heat_Protection), "Heat\nShields");
         public F Part_Pick_Category_Staging => A(nameof(Part_Pick_Category_Staging), "Staging");
         public F Part_Pick_Category_Mounts => A(nameof(Part_Pick_Category_Mounts), "Mounts");
+        public F Part_Pick_Category_Boosters => A(nameof(Part_Pick_Category_Boosters), "Boosters");
         #endregion
 
         #region Planets
