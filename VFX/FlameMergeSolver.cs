@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 
 namespace SFS.Parts.Modules
@@ -185,9 +186,9 @@ namespace SFS.Parts.Modules
         // How far out from a bright plume's axis whatever is under it is drowned out in full, as a fraction of the plume's half-width
         public const float GlareCore = 0.2f;
         // Whole plume, so the contact ramp eases a late touch out
-        const float TouchSearchLength = 1f;
+        internal const float TouchSearchLength = 1f;
         // how far past their glows jets pull each other in
-        const float EntrainReach = 0.15f;
+        internal const float EntrainReach = 0.15f;
         // mixing layer spread per unit down, at sea level
         const float EntrainSpread = 0.1f;
         const float EntrainThinAir = 0.01f; // dies away below this pressure
@@ -198,9 +199,9 @@ namespace SFS.Parts.Modules
         const float ShareFadeLength = 0.1f;
         // How strongly a bigger group stretches the plume
         const float GroupLengthPower = 0.5f;
-        const int TouchSamples = 16;
+        internal const int TouchSamples = 16;
         // reach past the first touch for full contact, of plume length
-        const float PresenceRamp = 0.25f;
+        internal const float PresenceRamp = 0.25f;
         // least bend, of plume length
         const float MinBend = 0.3f;
         // "No neighbour on this side". Finite so it survives being interpolated in the shader.
@@ -216,8 +217,10 @@ namespace SFS.Parts.Modules
         static int flameCount;
         static readonly List<bool> clustered = new List<bool>();
         static readonly List<int> cluster = new List<int>();
-        static readonly List<float> contacts = new List<float>(); // between every two flames of the cluster, by their slots
-        static readonly List<float> touches = new List<float>();  // and where they first meet
+        static float[] contacts = new float[256]; // between every two flames of the cluster, by their slots
+        static float[] touches = new float[256];  // and where they first meet
+        static float[] presences = new float[16];
+        static PlumeMath.TouchJet[] touchJets = new PlumeMath.TouchJet[16];
         static readonly List<float> crossing = new List<float>(); // the firmest contact across each gap in the sequence
         static readonly List<float> boundaries = new List<float>();
         static readonly List<float> litBoundaries = new List<float>();
@@ -233,10 +236,11 @@ namespace SFS.Parts.Modules
 
         // Comparers, not lambdas: these sort every frame and List.Sort wraps a Comparison in a new object.
         static readonly IComparer<FlameMeshModule> byCraft = Comparer<FlameMeshModule>.Create(
-            (a, b) => a.transform.root.GetInstanceID().CompareTo(b.transform.root.GetInstanceID()));
+            (a, b) => a.solveRoot.CompareTo(b.solveRoot));
         static readonly IComparer<int> byAcross = Comparer<int>.Create(
             (a, b) => flames[a].across.CompareTo(flames[b].across));
 
+        static readonly ProfilerMarker SolveMarker = new("FlameMergeSolver.Solve");
         static int solvedFrame = -1;
         static int solveIndex = 1; // counts solves, so a flame can tell whether it was solved in the last one; a new flame's 0 never matches
 
@@ -251,7 +255,8 @@ namespace SFS.Parts.Modules
                 return;
 
             solvedFrame = Time.frameCount;
-            Solve();
+            using (SolveMarker.Auto())
+                Solve();
         }
 
         static void Solve()
@@ -270,7 +275,11 @@ namespace SFS.Parts.Modules
                 }
 
                 if (module.isActiveAndEnabled && module.appliedThrottle > 0)
+                {
+                    module.solveRootTransform = module.transform.root;
+                    module.solveRoot = module.solveRootTransform.GetInstanceID();
                     firing.Add(module);
+                }
                 else
                     ClearMerge(module);
             }
@@ -281,10 +290,10 @@ namespace SFS.Parts.Modules
             int start = 0;
             while (start < firing.Count)
             {
-                Transform root = firing[start].transform.root;
+                Transform root = firing[start].solveRootTransform;
 
                 int end = start;
-                while (end < firing.Count && firing[end].transform.root == root)
+                while (end < firing.Count && firing[end].solveRoot == firing[start].solveRoot)
                     end++;
 
                 if (end - start >= 2)
@@ -363,7 +372,7 @@ namespace SFS.Parts.Modules
                     throttle = module.appliedThrottle,
                     atmospherePressure = module.appliedAtmospherePressure,
                     diamondOffset = module.DiamondOffset,
-                    envelope = new FlameMeshModule.Envelope(module.exitPressure, module.appliedThrottle, module.airSpread, module.appliedAtmospherePressure),
+                    envelope = new PlumeMath.Envelope(module.exitPressure, module.appliedThrottle, module.airSpread, module.appliedAtmospherePressure),
                 };
             }
 
@@ -372,6 +381,8 @@ namespace SFS.Parts.Modules
 
             for (int i = start; i < end; i++)
                 ClearMerge(firing[i]);
+            for (int i = 0; i < flameCount; i++)
+                flames[i].eddyFlow = flames[i].module.GetEddyFlow();
 
             // Every jet is a plume that could drown out a dimmer flame; ApplyGroup adds the merged ones
             glareSources.Clear();
@@ -514,36 +525,42 @@ namespace SFS.Parts.Modules
             // How firmly every two jets touch: by how far BOTH drawn plumes run on past where they would first meet.
             // One that fades out short of there touches nothing, however close the other one comes.
             clusterSize = cluster.Count;
-            contacts.Clear();
-            touches.Clear();
-            for (int i = 0; i < clusterSize * clusterSize; i++)
+            if (contacts.Length < clusterSize * clusterSize)
             {
-                contacts.Add(0);
-                touches.Add(float.PositiveInfinity);
+                contacts = new float[clusterSize * clusterSize * 2];
+                touches = new float[clusterSize * clusterSize * 2];
+            }
+            if (touchJets.Length < clusterSize)
+            {
+                touchJets = new PlumeMath.TouchJet[clusterSize * 2];
+                presences = new float[clusterSize * 2];
             }
 
             for (int i = 0; i < clusterSize; i++)
             {
                 ref Flame flame = ref flames[cluster[i]];
                 flame.slot = i;
-                flame.presence = 0;
+                touchJets[i] = new PlumeMath.TouchJet
+                {
+                    across = flame.across,
+                    along = flame.along,
+                    length = flame.length,
+                    radius = flame.radius,
+                    travel = GetTravel(flame),
+                    reach = flame.reach,
+                    envelope = flame.envelope,
+                };
+            }
+
+            unsafe
+            {
+                fixed (PlumeMath.TouchJet* jets = touchJets)
+                fixed (float* contact = contacts, touch = touches, presence = presences)
+                    PlumeMath.FindTouches(jets, clusterSize, contact, touch, presence);
             }
 
             for (int i = 0; i < clusterSize; i++)
-                for (int j = i + 1; j < clusterSize; j++)
-                {
-                    ref Flame a = ref flames[cluster[i]];
-                    ref Flame b = ref flames[cluster[j]];
-                    if (!TryGetTouchDistance(a, b, out float touch))
-                        continue;
-
-                    float contact = Mathf.Min(GetPresence(a, touch), GetPresence(b, touch));
-                    contacts[i * clusterSize + j] = contacts[j * clusterSize + i] = contact;
-                    touches[i * clusterSize + j] = touches[j * clusterSize + i] = touch;
-
-                    a.presence = Mathf.Max(a.presence, contact);
-                    b.presence = Mathf.Max(b.presence, contact);
-                }
+                flames[cluster[i]].presence = presences[i];
 
             sequence.Clear();
             foreach (int i in cluster)
@@ -605,54 +622,8 @@ namespace SFS.Parts.Modules
             ApplyGroup(firmest * together);
         }
 
-        // How far a jet's drawn plume runs on past a distance down the cluster: 0 = it has faded out by there .. 1 = well past
-        static float GetPresence(in Flame flame, float distance)
-            => Mathf.SmoothStep(0, 1, (flame.reach - distance) / (PresenceRamp * flame.length));
-
         static float GetContact(in Flame a, in Flame b) => contacts[a.slot * clusterSize + b.slot];
         static float GetTouch(in Flame a, in Flame b) => touches[a.slot * clusterSize + b.slot];
-
-        // How far downstream two jets first touch, if they do within their length
-        static bool TryGetTouchDistance(in Flame a, in Flame b, out float touch)
-        {
-            touch = 0;
-
-            // Both jets only exist downstream of the lower of the two nozzles.
-            float from = Mathf.Max(a.along, b.along);
-            if (a.along + a.length <= from || b.along + b.length <= from)
-                return false;
-            
-            float to = Mathf.Min(from + TouchSearchLength * Mathf.Max(a.length, b.length),
-                                 Mathf.Min(a.along + a.length, b.along + b.length));
-
-            // Too far apart to meet even where both are widest
-            float closest = Mathf.Min(b.across - a.across, Mathf.Min(GetAxis(b, from) - GetAxis(a, from), GetAxis(b, to) - GetAxis(a, to)));
-            if (GetMixingWidth(a, to) + GetMixingWidth(b, to) < closest)
-                return false;
-
-            float lastDistance = from, lastOverlap = 0;
-            for (int i = 0; i <= TouchSamples; i++)
-            {
-                float distance = Mathf.Lerp(from, to, (float)i / TouchSamples);
-
-                // A jet pointing away is still drawn in, as if side by side
-                float separation = Mathf.Min(b.across - a.across, GetAxis(b, distance) - GetAxis(a, distance));
-                float overlap = GetMixingWidth(a, distance) + GetMixingWidth(b, distance) - separation;
-                if (overlap >= 0)
-                {
-                    // Interpolated so the touch doesn't step between samples
-                    touch = i == 0 ? distance : Mathf.Lerp(lastDistance, distance, -lastOverlap / (overlap - lastOverlap));
-                    return true;
-                }
-
-                lastDistance = distance;
-                lastOverlap = overlap;
-            }
-
-            return false;
-        }
-
-        static float GetAxis(in Flame flame, float distance) => flame.across + GetTravel(flame) * (distance - flame.along);
 
         // Eased onto the group's heading only as far as the jet has joined it
         static float GetDrawnAxis(in Flame flame, float distance)
@@ -667,12 +638,6 @@ namespace SFS.Parts.Modules
         {
             distance = Mathf.Max(distance, 0);
             return bend <= 0 ? distance : distance < bend ? distance - distance * distance / (2 * bend) : bend / 2;
-        }
-
-        // Off the smooth envelope, or the first touch would skip between diamond bulges
-        static float GetMixingWidth(in Flame flame, float distance)
-        {
-            return flame.radius * flame.envelope.GetWidth((distance - flame.along) / flame.length) * (1 + EntrainReach);
         }
 
         // This jet's half-width at an absolute distance down the cluster's axis, in craft units.
@@ -1156,7 +1121,7 @@ namespace SFS.Parts.Modules
                 soot = other.module.Soot,
                 amount = other.amount,
                 seed = other.module.noiseSeed,
-                eddyFlow = other.module.GetEddyFlow(),
+                eddyFlow = other.eddyFlow,
             };
         }
 
@@ -1251,7 +1216,7 @@ namespace SFS.Parts.Modules
             public float airSpread;
             public float atmospherePressure;
             public float diamondOffset;
-            public FlameMeshModule.Envelope envelope;
+            public PlumeMath.Envelope envelope;
 
             // On the cluster's axis, filled in once its direction is known
             public int slot; // its place across the cluster
@@ -1270,6 +1235,7 @@ namespace SFS.Parts.Modules
             public float edgeRight;
             public float settleLeft;
             public float settleRight;
+            public float eddyFlow; // its turbulence's, for the neighbours it is drawn into
 
             // The group from its left end up to this jet, seen from its right (see AddUp), and from this jet on to its right end, seen from its left
             public float massUpTo, edgeUpTo, settleUpTo, lightUpTo;

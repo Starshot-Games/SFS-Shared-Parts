@@ -18,6 +18,7 @@ namespace SFS.Parts.Modules
         static readonly int Accumulated = Shader.PropertyToID("_SmokeAccumulated");
         static readonly int Airborne = Shader.PropertyToID("_SmokeAirborne");
         static readonly int AirborneLayer = Shader.PropertyToID("_Airborne");
+        static readonly int Resolution = Shader.PropertyToID("_SmokeResolution");
         const int AccumulatePass = 1; // of the trail shader; pass 0 draws straight onto the screen
         const int AccumulateSplitPass = 2; // and pass 2 into two textures, the smoke still in the air apart from what the ground has turned aside
         const int AirborneQueue = 2995; // the flames': smoke not yet down on the ground goes behind the launch pad (2996) and the parts with them
@@ -33,6 +34,10 @@ namespace SFS.Parts.Modules
         const int MaxTrails = 256;
         const int MaxTotalPoints = 20000;
         const int MaxSegments = 16000; // drawn per frame, which also keeps the mesh within 16-bit indices
+
+        // How many times coarser than the screen the smoke is accumulated at, before the composite spreads it back over it. 2 fills a quarter
+        // of the pixels, most of a frame on the pad, but zoomed far out it thickens the soft top of the cloud, so it is off for now
+        public static int downsample = 1;
 
         static readonly Dictionary<Material, SmokeTrails> renderers = new();
 
@@ -265,10 +270,12 @@ namespace SFS.Parts.Modules
                 if (!any)
                     return;
 
-                buffer.GetTemporaryRT(Accumulated, -1, -1, 0, FilterMode.Point, RenderTextureFormat.ARGBHalf);
+                int resolution = Mathf.Max(downsample, 1);
+                FilterMode filter = resolution > 1 ? FilterMode.Bilinear : FilterMode.Point;
+                buffer.GetTemporaryRT(Accumulated, -resolution, -resolution, 0, filter, RenderTextureFormat.ARGBHalf);
                 if (Split)
                 {
-                    buffer.GetTemporaryRT(Airborne, -1, -1, 0, FilterMode.Point, RenderTextureFormat.ARGBHalf);
+                    buffer.GetTemporaryRT(Airborne, -resolution, -resolution, 0, filter, RenderTextureFormat.ARGBHalf);
                     targets[0] = Airborne;
                     targets[1] = Accumulated;
                     buffer.SetRenderTarget(targets, targets[0]);
@@ -276,6 +283,7 @@ namespace SFS.Parts.Modules
                 else
                     buffer.SetRenderTarget(Accumulated);
                 buffer.ClearRenderTarget(false, true, Color.clear);
+                buffer.SetGlobalFloat(Resolution, resolution);
                 foreach (SmokeTrails renderer in renderers)
                     if (renderer != null && renderer.HasSmoke)
                         buffer.DrawMesh(renderer.mesh, renderer.transform.localToWorldMatrix, renderer.material, 0, Split ? AccumulateSplitPass : AccumulatePass, renderer.propertyBlock);

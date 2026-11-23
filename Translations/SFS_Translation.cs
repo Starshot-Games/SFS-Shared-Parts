@@ -213,7 +213,7 @@ namespace SFS
         public F Delete => A(nameof(Delete), "Delete");
         public F Rename => A(nameof(Rename), "Rename");
         public F Create => A(nameof(Create), "Create");
-        public F Delete_File_With_Type => A(nameof(Delete_File_With_Type), "Delete %filename% %filetype%");
+        public F Delete_File_With_Type => A(nameof(Delete_File_With_Type), "Delete %filename% %filetype%?");
         //
         [Documentation("In progress")]
         public F Saving_In_Progress => A(nameof(Saving_In_Progress), "Saving...");

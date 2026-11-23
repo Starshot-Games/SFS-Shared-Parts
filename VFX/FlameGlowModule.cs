@@ -1,5 +1,6 @@
 using System;
 using Sirenix.OdinInspector;
+using Unity.Profiling;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -13,6 +14,7 @@ namespace SFS.Parts.Modules
 
         static readonly int
             GlowRect = Shader.PropertyToID("glowRect"),
+            GlowOwnRect = Shader.PropertyToID("glowOwnRect"),
             GlowMargin = Shader.PropertyToID("glowMargin"),
             GlowSlabAxis = Shader.PropertyToID("glowSlabAxis"),
             GlowSlabShape = Shader.PropertyToID("glowSlabShape"),
@@ -65,10 +67,12 @@ namespace SFS.Parts.Modules
         static readonly Vector4[] slabAxis = new Vector4[Slabs];
         static readonly Vector4[] slabShape = new Vector4[Slabs];
         static readonly Vector4[] slabColor = new Vector4[Slabs];
+        static readonly float[] slabEddies = new float[Slabs];
         static readonly Vector4[] highlightRect = new Vector4[Highlights];
         static readonly Vector4[] highlightUV = new Vector4[Highlights];
         static readonly Vector4[] highlightColor = new Vector4[Highlights];
 
+        static readonly ProfilerMarker ApplyMarker = new("FlameGlowModule.Apply");
         MaterialPropertyBlock propertyBlock;
         MeshFilter meshFilter;
         float eddySeed;
@@ -82,7 +86,7 @@ namespace SFS.Parts.Modules
 
         // Driven by EngineEffects, after the flames - it gathers throttle/vacuum once and pushes them in here.
         // visibility is its flame's: under 1 while a brighter flame burning alongside drowns it out.
-        public void Apply(float throttle, float vacuum, float visibility = 1)
+        public unsafe void Apply(float throttle, float vacuum, float visibility = 1)
         {
             if (glow == null || flame == null)
                 return;
@@ -98,63 +102,45 @@ namespace SFS.Parts.Modules
             if (!on)
                 return;
 
+            using ProfilerMarker.AutoScope scope = ApplyMarker.Auto();
             GlowData data = vac ? vacuumData : GlowData.Lerp(groundData, vacuumData, adjVacuum);
 
             Transform space = glow.transform;
+            flame.GetPlume(out PlumeState plume);
+            Matrix4x4 toGlow = space.worldToLocalMatrix * plume.toWorld;
             float toLocal = 1 / Mathf.Max(space.TransformVector(Vector3.right).magnitude, 1e-6f);
-            float nozzle = flame.GetNozzleRadius(false) * toLocal;
+            float nozzle = PlumeMath.GetNozzleRadius(plume, false) * toLocal;
             float bloomRadius = data.bloomRadius * nozzle;
             float haloRadius = data.haloRadius * nozzle;
             float exitRadius = data.exitRadius * nozzle;
 
             // Slabs packed closer at the nozzle, where the plume is brightest and narrowest, on past where it fades into its afterglow
-            bool merging = flame.merge.amount > 0;
-            float fadedOut = merging ? Mathf.Max(flame.GetFadedOutMeshY(false), flame.GetFadedOutMeshY(true)) : flame.GetFadedOutMeshY(false);
+            bool merging = plume.merge.amount > 0;
+            float fadedOut = merging ? Mathf.Max(PlumeMath.GetFadedOutMeshY(plume, false), PlumeMath.GetFadedOutMeshY(plume, true)) : PlumeMath.GetFadedOutMeshY(plume, false);
             float end = fadedOut * (1 + data.afterglowLength);
-            Vector2 min = Vector2.positiveInfinity, max = Vector2.negativeInfinity;
-            Vector2 start = GetCentre(0, space);
-            Vector2 nozzleCentre = start;
             float eddyStream = Time.time * flame.GetEddyFlow(); // plume lengths the eddies have streamed
-            Vector2 nozzleDown = Vector2.down;
-            float nozzleLight = 0;
-
             for (int i = 0; i < Slabs; i++)
             {
-                float t = (i + 1f) / Slabs;
-                Vector2 stop = GetCentre(end * t * t, space);
-                Vector2 down = stop - start;
-                float length = down.magnitude;
-                down = length > 1e-6f ? down / length : Vector2.down;
-
-                t = (i + 0.5f) / Slabs;
-                GetSlab(end * t * t, space, toLocal, out float halfWidth, out float light);
-                Vector2 middle = (start + stop) * 0.5f;
-
+                float t = (i + 0.5f) / Slabs;
+                slabEddies[i] = GetEddies(end * t * t, eddyStream);
                 slabColor[i] = flame.FlameColor;
-
-                // The glow goes by how bright the flame looks, which saturates as its light climbs, so the white-hot core doesn't outshine the rest
-                if (data.rolloff > 0)
-                    light = (1 - Mathf.Exp(-data.rolloff * light)) / data.rolloff;
-
-                // The hot exhaust glows on down the flame and a little past it, lit by it, after the flame's own light has faded
-                if (i == 0)
-                {
-                    nozzleDown = down;
-                    nozzleLight = light;
-                }
-                float holdFrom = fadedOut * data.afterglowHold;
-                float cooled = 1 - Mathf.SmoothStep(0, 1, (end * t * t - holdFrom) / Mathf.Max(end - holdFrom, 1e-4f));
-                light = Mathf.Max(light, data.afterglow * nozzleLight * cooled);
-                light *= GetEddies(end * t * t, eddyStream);
-
-                slabAxis[i] = new Vector4(middle.x, middle.y, down.x, down.y);
-                slabShape[i] = new Vector4(halfWidth, length, light);
-
-                Vector2 extent = new Vector2(Mathf.Abs(down.y), Mathf.Abs(down.x)) * halfWidth + new Vector2(Mathf.Abs(down.x), Mathf.Abs(down.y)) * (length * 0.5f);
-                min = Vector2.Min(min, middle - extent);
-                max = Vector2.Max(max, middle + extent);
-                start = stop;
             }
+
+            GlowSlabInput input = new()
+            {
+                toGlow = toGlow,
+                toLocal = toLocal,
+                end = end,
+                fadedOut = fadedOut,
+                rolloff = data.rolloff,
+                afterglow = data.afterglow,
+                afterglowHold = data.afterglowHold,
+                throatEmission = ThroatEmission,
+            };
+            Vector2 min, max, nozzleCentre, nozzleDown;
+            fixed (float* eddies = slabEddies)
+            fixed (Vector4* axis = slabAxis, shape = slabShape)
+                PlumeMath.GetGlowSlabs(ref plume, ref input, eddies, axis, shape, out min, out max, out nozzleCentre, out nozzleDown);
 
             // The nozzle exit: the inside of the bell and the chamber seen through it, far hotter than any of the plume
             float exitHalfWidth = nozzle;
@@ -172,6 +158,7 @@ namespace SFS.Parts.Modules
             Highlight[] fromHighlights = vac ? vacuumData.highlights : groundData.highlights;
             Highlight[] toHighlights = vacuumData.highlights;
             Texture highlightTexture = null;
+            Vector2 highlightMin = nozzleCentre, highlightMax = nozzleCentre;
             for (int i = 0; i < Highlights; i++)
             {
                 highlightRect[i] = new Vector4(0, 0, 1, 1);
@@ -201,6 +188,8 @@ namespace SFS.Parts.Modules
                 float reach = Mathf.Max(Mathf.Max(Mathf.Abs(low.x), Mathf.Abs(high.x)), Mathf.Max(Mathf.Abs(low.y), Mathf.Abs(high.y)));
                 min = Vector2.Min(min, nozzleCentre - Vector2.one * reach);
                 max = Vector2.Max(max, nozzleCentre + Vector2.one * reach);
+                highlightMin = Vector2.Min(highlightMin, nozzleCentre - Vector2.one * reach);
+                highlightMax = Vector2.Max(highlightMax, nozzleCentre + Vector2.one * reach);
             }
 
             float flickering = Mathf.Max(1 + flicker * flame.FlickerNoise, 0);
@@ -210,6 +199,8 @@ namespace SFS.Parts.Modules
             propertyBlock ??= new MaterialPropertyBlock();
             glow.GetPropertyBlock(propertyBlock);
             propertyBlock.SetVector(GlowRect, new Vector4(min.x, min.y, max.x, max.y));
+            // Composited, the renderer's own pass draws only the highlights, and nothing at all past them
+            propertyBlock.SetVector(GlowOwnRect, FlameGlowCompositor.Available ? new Vector4(highlightMin.x, highlightMin.y, highlightMax.x, highlightMax.y) : new Vector4(min.x, min.y, max.x, max.y));
             propertyBlock.SetFloat(GlowMargin, margin);
             propertyBlock.SetVectorArray(GlowSlabAxis, slabAxis);
             propertyBlock.SetVectorArray(GlowSlabShape, slabShape);
@@ -243,44 +234,6 @@ namespace SFS.Parts.Modules
             float growth = Mathf.SmoothStep(0.3f, 1, meshY / EddyGrowth);
             float eddy = Mathf.Clamp(FlameMeshModule.GetNoise(eddySeed, (meshY - stream) * EddyTiles), -1, 2);
             return 1 + turbulence * growth * eddy;
-        }
-
-        // Where the plume's middle is at meshY, in the glow's space: its own jet's, going over to the group's as it merges
-        Vector2 GetCentre(float meshY, Transform space)
-        {
-            flame.GetCrossSection(meshY, false, out Vector2 centre, out _, out _);
-
-            float merge = flame.GetMergeAt(meshY);
-            if (merge > 0)
-            {
-                flame.GetCrossSection(meshY, true, out Vector2 groupCentre, out _, out _);
-                centre = Vector2.Lerp(centre, groupCentre, merge);
-            }
-
-            return space.InverseTransformPoint(centre);
-        }
-
-        // The plume across at meshY, in the glow's space: its half-width, and how bright it is over that.
-        // Merged, this flame's share of the group's light, spread over the group's plume, so the group's glows add up to its plume's.
-        void GetSlab(float meshY, Transform space, float toLocal, out float halfWidth, out float light)
-        {
-            flame.GetCrossSection(meshY, false, out _, out halfWidth, out _);
-            light = flame.GetBrightness(meshY, false) * flame.exitPressure;
-
-            float merge = flame.GetMergeAt(meshY);
-            if (merge > 0)
-            {
-                flame.GetCrossSection(meshY, true, out _, out float groupHalfWidth, out _);
-                float share = Mathf.Clamp01(flame.merge.share.y - flame.merge.share.x);
-                float groupLight = flame.GetBrightness(meshY, true) * flame.merge.exitPressure * share;
-
-                float mergedHalfWidth = Mathf.Lerp(halfWidth, groupHalfWidth, merge);
-                light = Mathf.Lerp(light * halfWidth, groupLight * groupHalfWidth, merge) / Mathf.Max(mergedHalfWidth, 1e-6f);
-                halfWidth = mergedHalfWidth;
-            }
-
-            halfWidth *= toLocal;
-            light *= ThroatEmission;
         }
 
         #if UNITY_EDITOR

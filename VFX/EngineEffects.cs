@@ -193,7 +193,8 @@ namespace SFS.Parts.Modules
                 MeshRenderer meshRenderer = mesh.mesh;
 
                 // Needs to GetPropertyBlock to preserve depth
-                MaterialPropertyBlock propertyBlock = new();
+                MaterialPropertyBlock propertyBlock = mesh.propertyBlock ??= new MaterialPropertyBlock();
+                propertyBlock.Clear();
                 if (meshRenderer.HasPropertyBlock())
                     meshRenderer.GetPropertyBlock(propertyBlock);
 
@@ -207,6 +208,7 @@ namespace SFS.Parts.Modules
         {
             public MeshRenderer mesh;
             public float intensityMultiplier = 1;
+            [NonSerialized] public MaterialPropertyBlock propertyBlock;
         }
     }
 }
