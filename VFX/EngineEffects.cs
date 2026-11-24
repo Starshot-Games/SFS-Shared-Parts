@@ -98,9 +98,7 @@ namespace SFS.Parts.Modules
             if (planet == null || !planet.HasAtmospherePhysics)
                 return 0;
 
-            double surface = planet.GetAtmosphericDensity(0);
-            if (surface <= 0)
-                return 0;
+            double surface = Planet.EARTH_SURFACE_DENSITY;
 
             return Mathf.Clamp01((float)(planet.GetAtmosphericDensity(location.Height) / surface));
         }
