@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace SFS.Parts.Modules 
 {
-    public partial class EngineModule : ThrustBase, Rocket.INJ_IsPlayer, Rocket.INJ_Physics, Rocket.INJ_Throttle, Rocket.INJ_TurnAxisTorque, Rocket.INJ_Location
+    public partial class EngineModule : ThrustBase, I_NewPartModule, Rocket.INJ_IsPlayer, Rocket.INJ_Physics, Rocket.INJ_Throttle, Rocket.INJ_TurnAxisTorque, Rocket.INJ_Location
     {
         [BoxGroup("Ref", false), SuffixLabel("t"), LabelText("Engine Mass (Scaled)")] public float oldMass = float.NaN;
         //
@@ -30,6 +30,8 @@ namespace SFS.Parts.Modules
         //
         [BoxGroup("Vacuum", false)] public bool isVacuum;
         public const double vacuumMaxPressure = 0.25; // bar (surface = 1); vacuum engines can't ignite where ambient pressure is above this
+        // Parts from saves without this variable keep the default (true); newly placed parts get false
+        public const string AtmosphereOverrideVariable = "legacy_forceSL";
 
 
         // ThrustBase (engine values already match the base format 1:1)
@@ -48,6 +50,7 @@ namespace SFS.Parts.Modules
         //
         readonly Float_Local throttle_Input = new Float_Local();
         readonly Float_Local turnAxis_Input = new Float_Local();
+        VariableList<bool>.Variable atmosphereOverride;
         float Rocket.INJ_Throttle.Throttle { set => throttle_Input.Value = value; }
         float Rocket.INJ_TurnAxisTorque.TurnAxis { set => turnAxis_Input.Value = value; }
 
@@ -57,6 +60,7 @@ namespace SFS.Parts.Modules
         // Get
         I_MsgLogger Logger => IsPlayer ? (I_MsgLogger)MsgDrawer.main : new MsgNone();
         bool HasFuel(I_MsgLogger logger) => source.CanFlow(logger);
+        bool BlockedByAtmosphere => isVacuum && atmosphereOverride?.Value != true && !Location.planet.CanUseVacuumEngines(Location.Height);
 
 
         // Description
@@ -98,11 +102,31 @@ namespace SFS.Parts.Modules
 
         void Awake()
         {
+            RegisterAtmosphereOverride();
+
             if (float.IsNaN(oldMass) || Base.worldBase == null)
                 return;
             
             double massMultiplier = Base.worldBase.insideWorld.Value? Base.worldBase.settings.difficulty.EngineMassMultiplier : 1;
             GetComponent<VariablesModule>().doubleVariables.SetValue("mass", oldMass * massMultiplier, (true, false));
+        }
+        // Runs before the save is applied, so saves without the variable keep the legacy default
+        void RegisterAtmosphereOverride()
+        {
+            Part part = GetComponentInParent<Part>();
+            if (!isVacuum || part == null || part.variablesModule == null)
+                return;
+
+            BoolVariableList variables = part.variablesModule.boolVariables;
+            if (!variables.Has(AtmosphereOverrideVariable))
+                variables.SetValue(AtmosphereOverrideVariable, true, (true, true));
+
+            atmosphereOverride = variables.GetVariable(AtmosphereOverrideVariable);
+        }
+        void I_NewPartModule.OnNewPart()
+        {
+            if (atmosphereOverride != null)
+                atmosphereOverride.Value = false;
         }
         void Start()
         {
@@ -168,7 +192,7 @@ namespace SFS.Parts.Modules
         {
             if (Rb2d == null)
                 return;
-            if (isVacuum && engineOn.Value && throttle_Out.Value > 0 && !Location.planet.CanUseVacuumEngines(Location.Height))
+            if (engineOn.Value && throttle_Out.Value > 0 && BlockedByAtmosphere)
             {
                 engineOn.Value = false;
                 if (IsPlayer)
@@ -199,7 +223,7 @@ namespace SFS.Parts.Modules
             if (!HasFuel(logger))
                 return;
 
-            if (isVacuum && !Location.planet.CanUseVacuumEngines(Location.Height))
+            if (BlockedByAtmosphere)
             {
                 string height = Location.planet.VacuumStartHeight.ToDistanceString(false);
                 logger.Log(Loc.main.Cannot_Ignite_Vacuum_Engines_Below.Inject(height, "height"));
