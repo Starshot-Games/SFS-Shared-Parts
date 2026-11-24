@@ -102,6 +102,34 @@ namespace SFS.Parts.Modules
                 glows.Remove(glow);
         }
 
+        #if UNITY_EDITOR
+        // A script reload forgets the quads and buffers, which would then stay on screen with nothing left to update them
+        [UnityEditor.InitializeOnLoadMethod]
+        static void ReleaseBeforeReload() => UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += Release;
+
+        static void Release()
+        {
+            foreach (KeyValuePair<Camera, CommandBuffer> attached in buffers)
+                if (attached.Key != null)
+                    attached.Key.RemoveCommandBuffer(CameraEvent.BeforeForwardAlpha, attached.Value);
+            buffers.Clear();
+
+            foreach (Group group in groups)
+            {
+                if (group.quad != null)
+                    Object.DestroyImmediate(group.quad.gameObject);
+                if (group.composites != null)
+                    foreach (Material composite in group.composites)
+                        if (composite != null)
+                            Object.DestroyImmediate(composite);
+            }
+            groups.Clear();
+
+            if (quadMesh != null)
+                Object.DestroyImmediate(quadMesh);
+        }
+        #endif
+
         static Mesh QuadMesh
         {
             get

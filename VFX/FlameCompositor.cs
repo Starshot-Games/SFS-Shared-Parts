@@ -109,6 +109,42 @@ namespace SFS.Parts.Modules
                     plume.meshRenderer.forceRenderingOff = false;
         }
 
+        #if UNITY_EDITOR
+        // A script reload forgets the quads, buffers and textures, which would then stay on screen with nothing left to update them
+        [UnityEditor.InitializeOnLoadMethod]
+        static void ReleaseBeforeReload() => UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += Release;
+
+        static void Release()
+        {
+            foreach (KeyValuePair<Camera, CommandBuffer> attached in buffers)
+                if (attached.Key != null)
+                    attached.Key.RemoveCommandBuffer(CameraEvent.BeforeForwardAlpha, attached.Value);
+            buffers.Clear();
+
+            foreach (FlameMeshModule flame in flames)
+                if (flame != null)
+                    foreach (FlameMeshModule.MeshRef plume in flame.meshRenderers)
+                        if (plume.meshRenderer != null)
+                            plume.meshRenderer.forceRenderingOff = false;
+
+            foreach (Targets owned in textures.Values)
+                owned.Release();
+            textures.Clear();
+
+            foreach (MeshRenderer quad in quads.Values)
+                if (quad != null)
+                {
+                    if (quad.sharedMaterial != null)
+                        Object.DestroyImmediate(quad.sharedMaterial);
+                    Object.DestroyImmediate(quad.gameObject);
+                }
+            quads.Clear();
+
+            if (quadMesh != null)
+                Object.DestroyImmediate(quadMesh);
+        }
+        #endif
+
         static Mesh QuadMesh
         {
             get
