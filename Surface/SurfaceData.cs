@@ -93,7 +93,7 @@ namespace SFS.Parts.Modules
     {
         const float MaxDistance = 0.05f;
         const float MinOverlap = 0.05f;
-        const int MaxAngleDiff = 5;
+        const int MaxAngleDiff = 360; // no idea why the angle limiter was there in the first place, but i guess not anymore
     
         // Connection
         public static bool SurfacesConnect(Part A, SurfaceData B, out float overlap, out Vector2 center)
