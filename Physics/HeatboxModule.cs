@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using SFS.Variables;
 using SFS.World;
 using SFS.World.Drag;
 using UnityEngine;
+using UnityEngine.Profiling;
 using UnityEngine.SceneManagement;
 
 namespace SFS.Parts.Modules
@@ -28,10 +30,22 @@ namespace SFS.Parts.Modules
         public Bool_Reference enableHeat;
 
         private ThrustBase engine;
+        private int staggerIndex;
+        private int physFrameIndex;
+        private List<Collider2D> resultsCache = new();
 
+        private const int STAGGER = 4;
+        
         void Start()
         {
             partsLayerMask = LayerMask.GetMask("Parts");
+
+            contactFilter = new ContactFilter2D()
+            {
+                useLayerMask = true,
+                layerMask = partsLayerMask
+            };
+            
             engine = gameObject.GetComponentInParent<ThrustBase>();
 
             if (!cacheInitialized)
@@ -43,16 +57,23 @@ namespace SFS.Parts.Modules
                 
                 cacheInitialized = true;
             }
+
+            staggerIndex = Mathf.Abs(engineId++) % STAGGER;
         }
 
         private static bool cacheInitialized;
         private static Dictionary<Collider2D, (HeatModuleBase hmb, bool isNull)> cache = new();
+        private static ContactFilter2D contactFilter;
+        
         private static int partsLayerMask;
         private static bool gameManagerIsNull = true;
         private static int updateFrameIndex;
+        private static int engineId;
         
         void FixedUpdate()
         {
+            physFrameIndex++;
+            
             if (Time.frameCount > updateFrameIndex)
             {
                 gameManagerIsNull = GameManager.main == null;
@@ -61,11 +82,10 @@ namespace SFS.Parts.Modules
 
             if (gameManagerIsNull) return;
 
-            if (!Calculate(out _, out var center, out var globSize, out var angle)) return;
+            if (!Calculate(out _, out _, out _, out _, out var center, out var globSize, out var angle)) return;
             
-            // ReSharper disable once Unity.PreferNonAllocApi
-            // the non-allocating method is deprecated, and the alternative doesn't provide what we want
-            foreach (Collider2D col in Physics2D.OverlapBoxAll(center, globSize, angle, partsLayerMask))
+            if (physFrameIndex % STAGGER == staggerIndex) Physics2D.OverlapBox(center, globSize, angle, contactFilter, resultsCache);
+            foreach (Collider2D col in resultsCache)
             {
                 HeatModuleBase hmb;
                 if (!cache.TryGetValue(col, out var tuple))
@@ -102,58 +122,60 @@ namespace SFS.Parts.Modules
 
         void OnDrawGizmosSelected()
         {
-            if (!Calculate(out var points, out _, out _, out _)) return;
+            if (!Calculate(out var p0, out var p1, out var p2, out var p3, out _, out _, out _)) return;
             Gizmos.color = Color.yellow;
-            Gizmos.DrawLine(points[0], points[1]);
-            Gizmos.DrawLine(points[1], points[2]);
-            Gizmos.DrawLine(points[2], points[3]);
-            Gizmos.DrawLine(points[3], points[0]);
+            Gizmos.DrawLine(p0, p1);
+            Gizmos.DrawLine(p1, p3);
+            Gizmos.DrawLine(p2, p3);
+            Gizmos.DrawLine(p3, p0);
         }
 
         bool Calculate(
-            out Vector2[] globalPoints, 
+            out Vector2 p0,
+            out Vector2 p1,
+            out Vector2 p2,
+            out Vector2 p3,
             out Vector2 globalCenter,
             out Vector2 globalSize,
             out float angle)
         {
-            globalPoints = Array.Empty<Vector2>();
             globalCenter = Vector2.zero;
             globalSize = Vector2.zero;
             angle = 0f;
             
-            float effectiveThrottle = heatboxSizeCurve.Equals(defaultCurve) ? (float)sizePercent.Value : heatboxSizeCurve.Evaluate((float)sizePercent.Value);
-            if (effectiveThrottle == 0f || !enableHeat.Value) return false; // return false when the heatbox shouldn't be there at all
+            p0 = Vector2.zero;
+            p1 = Vector2.zero;
+            p2 = Vector2.zero;
+            p3 = Vector2.zero;
             
-            Vector2 localSize = new Vector2(size.x, size.y * effectiveThrottle);
+            if (!enableHeat.Value || sizePercent.Value == 0.0) return false; // return false when the heatbox shouldn't be there at all
+            
+            Vector2 localSize = new Vector2(size.x, size.y * (float)sizePercent.Value);
             Vector2 localCenter = position + Vector2.up * localSize * (sizingAnchor * 0.5f);
             
-            // ReSharper disable once InconsistentNaming
-            const int POINTS_LENGTH = 4;
-            
-            Vector2[] points = new Vector2[POINTS_LENGTH]
-            {
-                localCenter + localSize * new Vector2(-0.5f, -0.5f),
-                localCenter + localSize * new Vector2(0.5f, -0.5f),
-                localCenter + localSize * new Vector2(0.5f, 0.5f),
-                localCenter + localSize * new Vector2(-0.5f, 0.5f)
-            };
+            p0 = localCenter + localSize * new Vector2(-0.5f, -0.5f);
+            p1 = localCenter + localSize * new Vector2(0.5f, -0.5f);
+            p2 = localCenter + localSize * new Vector2(0.5f, 0.5f);
+            p3 = localCenter + localSize * new Vector2(-0.5f, 0.5f);
 
             Matrix4x4 ltw = transform.localToWorldMatrix;
             
             globalCenter = Vector2.zero;
-            for (int i = 0; i < POINTS_LENGTH; i++) // array length should always be 4
-            {
-                Vector2 transformed = ltw.MultiplyPoint3x4(points[i]);
-                globalCenter += transformed;
-                points[i] = transformed;
-            }
-            globalCenter *= 1f / POINTS_LENGTH;
+            p0 = ltw.MultiplyPoint3x4(p0);
+            globalCenter += p0;
+            p1 = ltw.MultiplyPoint3x4(p1);
+            globalCenter += p1;
+            p2 = ltw.MultiplyPoint3x4(p2);
+            globalCenter += p2;
+            p3 = ltw.MultiplyPoint3x4(p3);
+            globalCenter += p3;
+            
+            globalCenter *= 1f / 4;
 
-            angle = Vector2.SignedAngle(Vector2.right, points[1] - points[0]);
-            globalPoints = points;
+            angle = Vector2.SignedAngle(Vector2.right, p1 - p0);
             globalSize = new Vector2(
-                (points[1] - points[0]).magnitude,
-                (points[2] - points[1]).magnitude
+                (p1 - p0).magnitude,
+                (p2 - p1).magnitude
             );
 
             return true;

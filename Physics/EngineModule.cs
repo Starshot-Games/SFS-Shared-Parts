@@ -179,7 +179,13 @@ namespace SFS.Parts.Modules
         void RecalculateGimbal()
         {
             if (hasGimbal && gimbalOn.Value)
-                gimbal.targetTime.Value = throttle_Out.Value > 0 ? turnAxis_Input.Value * transform.RotationDirection() : 0;
+            {
+                float newValue = throttle_Out.Value > 0 ? turnAxis_Input.Value * transform.RotationDirection() : 0;
+                if (Mathf.Abs(gimbal.targetTime.Value - newValue) >= 0.05f)
+                {
+                    gimbal.targetTime.Value = newValue;
+                }
+            }
         }
 
         

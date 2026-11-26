@@ -103,6 +103,7 @@ namespace SFS.Parts.Modules
             FlickerProperty = Shader.PropertyToID("flameFlicker"),
             ExitPressureProperty = Shader.PropertyToID("exitPressure"),
             AtmospherePressureProperty = Shader.PropertyToID("atmospherePressure"),
+            AirTermsProperty = Shader.PropertyToID("airTerms"),
             IsMachDiamondsProperty = Shader.PropertyToID("isMachDiamondsShader");
         
         
@@ -427,6 +428,7 @@ namespace SFS.Parts.Modules
 
             PlumeState plume = default;
             FillPlumeParams(ref plume);
+            Vector4 airTerms = new(PlumeMath.GetTailPresence(atmospherePressure), PlumeMath.GetTailChurn(atmospherePressure), PlumeMath.GetTailStart(atmospherePressure), Mathf.Sqrt(Mathf.Clamp01(atmospherePressure)));
 
             // Set
             foreach (MeshRef a in meshRenderers)
@@ -458,6 +460,7 @@ namespace SFS.Parts.Modules
                 propertyBlock.SetVector(SmokeCoverProperty, smokeCover);
 
                 propertyBlock.SetFloat(AtmospherePressureProperty, atmospherePressure); // 1 bar at ground -> 0 in vacuum, falling off exponentially with height
+                propertyBlock.SetVector(AirTermsProperty, airTerms);
 
                 propertyBlock.SetFloat(IsMachDiamondsProperty, a.machDiamondsMesh? 1 : 0);
                 
