@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using SFS.Platform;
 using SFS.World;
 using SFS.WorldBase;
@@ -14,18 +15,23 @@ namespace SFS.Parts.Modules
         static readonly int NoiseOrigin = Shader.PropertyToID("_NoiseOrigin");
         static readonly int NoiseTileProperty = Shader.PropertyToID("_NoiseTile");
         static readonly int PuffSize = Shader.PropertyToID("_PuffSize");
+        static readonly int MovingSpeed = Shader.PropertyToID("_MovingSpeed");
         static readonly int Sun = Shader.PropertyToID("_Sun");
         static readonly int Accumulated = Shader.PropertyToID("_SmokeAccumulated");
         static readonly int Airborne = Shader.PropertyToID("_SmokeAirborne");
         static readonly int AirborneLayer = Shader.PropertyToID("_Airborne");
         static readonly int Resolution = Shader.PropertyToID("_SmokeResolution");
+        static readonly int ScreenRect = Shader.PropertyToID("_SmokeRect");
+        static readonly int EdgeBreakup = Shader.PropertyToID("_EdgeBreakup");
         const int AccumulatePass = 1; // of the trail shader; pass 0 draws straight onto the screen
         const int AccumulateSplitPass = 2; // and pass 2 into two textures, the smoke still in the air apart from what the ground has turned aside
         const int AirborneQueue = 2995; // the flames': smoke not yet down on the ground goes behind the launch pad (2996) and the parts with them
         const float GroundShowTime = 0.4f; // s smoke the ground has turned aside takes to come out in front of the pad
+        const float AirSqueeze = 4; // octaves smoke slowing in the air may squeeze its puffs before they hand over to the still ones, over one more
 
         const float MinDepth = 0.002f; // segments fainter than this are left out
-        const float QuadWidth = 1.5f;  // of the radius, leaving room for the shader's ragged edges
+        const float EdgeReach = 1.45f; // of the radius, how far the shader's ragged edges reach at full edge breakup
+        const float ReachMargin = 1.01f;
         const float ConeSlope = 0.8f;  // m the smoke can have spread out per m back from where it comes out, or more where its flame widens faster
         const double NoiseTile = 8192; // m across the tile of the shader's largest puffs; smaller ones halve it, so its fractions serve them all
         const float SunTurn = 25;      // ° the light comes from left of straight up
@@ -38,7 +44,6 @@ namespace SFS.Parts.Modules
         // How many times coarser than the screen the smoke is accumulated at, before the composite spreads it back over it. 2 fills a quarter
         // of the pixels, most of a frame on the pad, but zoomed far out it thickens the soft top of the cloud, so it is off for now
         public static int downsample = 1;
-
         static readonly Dictionary<Material, SmokeTrails> renderers = new();
 
         public static SmokeTrail StartTrail(Material material, Planet planet, float side, float spreadPhase)
@@ -88,18 +93,39 @@ namespace SFS.Parts.Modules
         Material material;
         Double2 anchor; // planet-centred position of this object's origin when the mesh was built
 
-        readonly List<Vector3> vertices = new();
-        readonly List<Color32> colors = new();
-        readonly List<Vector4> segments = new();
-        readonly List<Vector4> shapes = new();
-        readonly List<Vector4> smokes = new();
-        readonly List<Vector4> carried = new();
-        readonly List<Vector4> speeds = new();
-        readonly List<Vector2> cones = new();
-        readonly List<Vector2> ends = new();
-        readonly List<Vector2> grounds = new();
-        float puffSize;
-        readonly List<int> indices = new();
+        // One vertex as the trail shader reads it, all in a single stream
+        [StructLayout(LayoutKind.Sequential)]
+        struct Vertex
+        {
+            public Vector3 position;
+            public Color32 color;
+            public Vector4 segment, shape, smoke, carried;
+            public Vector2 ends;
+            public Vector3 speed;
+            public Vector2 cone, ground;
+        }
+
+        static readonly VertexAttributeDescriptor[] Layout =
+        {
+            new(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
+            new(VertexAttribute.Color, VertexAttributeFormat.UNorm8, 4),
+            new(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 4),
+            new(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 4),
+            new(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 4),
+            new(VertexAttribute.TexCoord3, VertexAttributeFormat.Float32, 4),
+            new(VertexAttribute.TexCoord4, VertexAttributeFormat.Float32, 2),
+            new(VertexAttribute.TexCoord5, VertexAttributeFormat.Float32, 3),
+            new(VertexAttribute.TexCoord6, VertexAttributeFormat.Float32, 2),
+            new(VertexAttribute.TexCoord7, VertexAttributeFormat.Float32, 2),
+        };
+        const MeshUpdateFlags UpdateFlags = MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
+
+        Vertex[] vertices = new Vertex[1024];
+        int vertexCount, vertexCapacity;
+        bool indicesSet;
+        Vector2 boundsMin, boundsMax;
+        bool hasGround; // whether any smoke drawn has come out in front of the launch pad
+        float puffSize, edgeReach, movingSpeed;
 
         void Setup(Material material)
         {
@@ -145,8 +171,22 @@ namespace SFS.Parts.Modules
             Destroy(mesh);
         }
 
-        bool HasSmoke => mesh != null && mesh.vertexCount > 0;
-        
+        bool HasSmoke => vertexCount > 0;
+
+        // Widens min and max to take in where the smoke's mesh lies on the camera's viewport
+        void ExtendViewport(Camera camera, ref Vector2 min, ref Vector2 max)
+        {
+            Bounds bounds = mesh.bounds;
+            Matrix4x4 toWorld = transform.localToWorldMatrix;
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3 corner = new(i % 2 == 0 ? bounds.min.x : bounds.max.x, i < 2 ? bounds.min.y : bounds.max.y, bounds.center.z);
+                Vector2 viewport = camera.WorldToViewportPoint(toWorld.MultiplyPoint3x4(corner));
+                min = Vector2.Min(min, viewport);
+                max = Vector2.Max(max, viewport);
+            }
+        }
+
         static class Compositor
         {
             static readonly List<SmokeTrails> renderers = new();
@@ -249,6 +289,7 @@ namespace SFS.Parts.Modules
                 {
                     Shader.SetGlobalTexture(Accumulated, None);
                     Shader.SetGlobalTexture(Airborne, None);
+                    Shader.SetGlobalVector(ScreenRect, new Vector4(0, 0, 1, 1));
                     return;
                 }
 
@@ -260,36 +301,52 @@ namespace SFS.Parts.Modules
                     attached = camera;
                 }
 
-                bool any = false;
+                int resolution = Mathf.Max(downsample, 1);
+                bool any = false, grounded = false;
+                Vector2 min = Vector2.positiveInfinity, max = Vector2.negativeInfinity;
                 foreach (SmokeTrails renderer in renderers)
-                    any |= renderer != null && renderer.HasSmoke;
+                    if (renderer != null && renderer.HasSmoke)
+                    {
+                        any = true;
+                        grounded |= renderer.hasGround;
+                        renderer.ExtendViewport(camera, ref min, ref max);
+                    }
 
+                // The composite only covers the smoke, and a texel of the accumulation more
+                Vector2 margin = new Vector2(resolution + 1f, resolution + 1f) / new Vector2(camera.pixelWidth, camera.pixelHeight);
+                min = Vector2.Max(min - margin, Vector2.zero);
+                max = Vector2.Min(max + margin, Vector2.one);
+                any &= max.x > min.x && max.y > min.y;
+
+                // Without smoke in front of the pad, all of it goes in the airborne texture alone
+                bool split = Split && grounded;
                 buffer.Clear();
-                Quad.enabled = any;
+                Quad.enabled = any && (split || !Split);
                 AirborneQuad.enabled = any && Split;
                 if (!any)
                     return;
 
-                int resolution = Mathf.Max(downsample, 1);
                 FilterMode filter = resolution > 1 ? FilterMode.Bilinear : FilterMode.Point;
-                buffer.GetTemporaryRT(Accumulated, -resolution, -resolution, 0, filter, RenderTextureFormat.ARGBHalf);
-                if (Split)
+                int target = Split ? Airborne : Accumulated;
+                buffer.GetTemporaryRT(target, -resolution, -resolution, 0, filter, RenderTextureFormat.ARGBHalf);
+                if (split)
                 {
-                    buffer.GetTemporaryRT(Airborne, -resolution, -resolution, 0, filter, RenderTextureFormat.ARGBHalf);
+                    buffer.GetTemporaryRT(Accumulated, -resolution, -resolution, 0, filter, RenderTextureFormat.ARGBHalf);
                     targets[0] = Airborne;
                     targets[1] = Accumulated;
                     buffer.SetRenderTarget(targets, targets[0]);
                 }
                 else
-                    buffer.SetRenderTarget(Accumulated);
+                    buffer.SetRenderTarget(target);
                 buffer.ClearRenderTarget(false, true, Color.clear);
                 buffer.SetGlobalFloat(Resolution, resolution);
+                buffer.SetGlobalVector(ScreenRect, new Vector4(min.x, min.y, max.x, max.y));
                 foreach (SmokeTrails renderer in renderers)
                     if (renderer != null && renderer.HasSmoke)
-                        buffer.DrawMesh(renderer.mesh, renderer.transform.localToWorldMatrix, renderer.material, 0, Split ? AccumulateSplitPass : AccumulatePass, renderer.propertyBlock);
-                buffer.SetGlobalTexture(Accumulated, Accumulated);
-                if (Split)
-                    buffer.SetGlobalTexture(Airborne, Airborne);
+                        buffer.DrawMesh(renderer.mesh, renderer.transform.localToWorldMatrix, renderer.material, 0, split ? AccumulateSplitPass : AccumulatePass, renderer.propertyBlock);
+                buffer.SetGlobalTexture(target, target);
+                if (split)
+                    buffer.SetGlobalTexture(Accumulated, Accumulated);
                 buffer.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             }
         }
@@ -328,7 +385,8 @@ namespace SFS.Parts.Modules
             if (!Enabled)
             {
                 ClearTrails();
-                mesh.Clear();
+                vertexCount = 0;
+                Upload();
                 if (meshRenderer != null)
                     meshRenderer.enabled = false;
                 return;
@@ -362,21 +420,16 @@ namespace SFS.Parts.Modules
 
         void BuildMesh(double now)
         {
-            vertices.Clear();
-            colors.Clear();
-            segments.Clear();
-            shapes.Clear();
-            smokes.Clear();
-            carried.Clear();
-            speeds.Clear();
-            cones.Clear();
-            ends.Clear();
-            grounds.Clear();
-            indices.Clear();
+            vertexCount = 0;
+            hasGround = false;
+            boundsMin = Vector2.positiveInfinity;
+            boundsMax = Vector2.negativeInfinity;
 
             anchor = WorldView.main.positionOffset.Value;
             transform.position = Vector3.zero;
             puffSize = Mathf.Max(material.GetFloat(PuffSize), 1e-3f);
+            movingSpeed = Mathf.Max(material.GetFloat(MovingSpeed), 1e-3f);
+            edgeReach = Mathf.Lerp(1, EdgeReach, Mathf.Clamp01(material.GetFloat(EdgeBreakup))) * ReachMargin;
 
             Camera camera = WorldView.main.worldCamera != null ? WorldView.main.worldCamera.camera : null;
             if (camera != null && camera.isActiveAndEnabled && !WorldView.main.scaledSpace.Value)
@@ -386,25 +439,11 @@ namespace SFS.Parts.Modules
                     AddTrail(trail, now, view);
             }
 
-            mesh.Clear();
+            Upload();
             if (meshRenderer != null)
-                meshRenderer.enabled = vertices.Count > 0;
-            if (vertices.Count == 0)
+                meshRenderer.enabled = vertexCount > 0;
+            if (vertexCount == 0)
                 return;
-
-            mesh.indexFormat = vertices.Count > ushort.MaxValue ? IndexFormat.UInt32 : IndexFormat.UInt16;
-            mesh.SetVertices(vertices);
-            mesh.SetColors(colors);
-            mesh.SetUVs(0, segments);
-            mesh.SetUVs(1, shapes);
-            mesh.SetUVs(2, smokes);
-            mesh.SetUVs(3, carried);
-            mesh.SetUVs(4, ends);
-            mesh.SetUVs(5, speeds);
-            mesh.SetUVs(6, cones);
-            mesh.SetUVs(7, grounds);
-            mesh.SetTriangles(indices, 0, false);
-            mesh.RecalculateBounds();
 
             // The noise is laid in the air, so it's anchored to where this origin is in the world
             propertyBlock.SetVector(NoiseOrigin, new Vector4(Fraction(anchor.x / NoiseTile), Fraction(anchor.y / NoiseTile)));
@@ -417,6 +456,41 @@ namespace SFS.Parts.Modules
                 meshRenderer.SetPropertyBlock(propertyBlock);
         }
 
+        // Hands the vertices built this frame to the mesh. Its quads always join their corners the same way, so the indices are set once for as many as it can draw
+        void Upload()
+        {
+            if (!indicesSet)
+            {
+                ushort[] quads = new ushort[MaxSegments * 6];
+                for (int i = 0, v = 0; i < quads.Length; i += 6, v += 4)
+                {
+                    quads[i] = (ushort)v;
+                    quads[i + 1] = (ushort)(v + 1);
+                    quads[i + 2] = (ushort)(v + 2);
+                    quads[i + 3] = (ushort)v;
+                    quads[i + 4] = (ushort)(v + 2);
+                    quads[i + 5] = (ushort)(v + 3);
+                }
+                mesh.SetIndexBufferParams(quads.Length, IndexFormat.UInt16);
+                mesh.SetIndexBufferData(quads, 0, 0, quads.Length, UpdateFlags);
+                indicesSet = true;
+            }
+
+            if (vertexCount > vertexCapacity)
+            {
+                vertexCapacity = Mathf.Min(Mathf.Max(vertexCount, vertexCapacity * 2, 1024), MaxSegments * 4);
+                mesh.SetVertexBufferParams(vertexCapacity, Layout);
+            }
+            if (vertexCount > 0)
+                mesh.SetVertexBufferData(vertices, 0, 0, vertexCount, 0, UpdateFlags);
+
+            Bounds bounds = vertexCount > 0 ? new Bounds((boundsMin + boundsMax) / 2, boundsMax - boundsMin) : default;
+            if (mesh.subMeshCount != 1)
+                mesh.subMeshCount = 1;
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, vertexCount / 4 * 6) { bounds = bounds, vertexCount = vertexCount }, UpdateFlags);
+            mesh.bounds = bounds;
+        }
+
         static float Fraction(double value) => (float)(value - System.Math.Floor(value));
 
         // How far the smoke at both ends has carried the noise, in tiles, less the whole tiles they share - which the tiling can't show - so it stays small
@@ -426,17 +500,20 @@ namespace SFS.Parts.Modules
             return new Vector4((float)(newer.x / tile - wholeX), (float)(newer.y / tile - wholeY), (float)(older.x / tile - wholeX), (float)(older.y / tile - wholeY));
         }
 
-        // For smoke the ground has turned aside, how far the puffs it carried are squeezed or stretched along a segment: 0 within 1.4 times
-        // either way, 1 from twice, and only where that covers enough of a puff to show, a quarter of one
+        // How far the puffs the smoke carried are squeezed or stretched along a segment, where the ground turned it aside or it piles into a stop:
+        // 0 within 1.4 times either way, 1 from twice (aground) or past AirSqueeze, and only where that covers a quarter of a puff
         float GetDistortion(Node newer, Node older, Vector2 delta, float length)
         {
-            if (!newer.grounded && !older.grounded)
+            bool grounded = newer.grounded || older.grounded;
+            float weight = grounded ? 1 : 1 - Mathf.Clamp01(Mathf.Min(newer.speed, older.speed) / movingSpeed);
+            if (weight <= 0)
                 return 0;
 
             float texture = (delta - (Vector2)(older.carried - newer.carried)).magnitude;
             float stretch = Mathf.Abs(Mathf.Log(Mathf.Max(texture, 1e-4f) / Mathf.Max(length, 1e-4f), 2));
+            float distorted = grounded ? Mathf.Clamp01(stretch * 2 - 1) : Mathf.Clamp01(stretch - AirSqueeze);
             float puff = puffSize * Mathf.Min(newer.radius, older.radius);
-            return Mathf.Clamp01(stretch * 2 - 1) * Mathf.Clamp01(Mathf.Max(texture, length) * 4 / Mathf.Max(puff, 1e-3f));
+            return weight * distorted * Mathf.Clamp01(Mathf.Max(texture, length) * 4 / Mathf.Max(puff, 1e-3f));
         }
 
         // The part of the z = 0 plane the camera sees, with a margin
@@ -461,7 +538,7 @@ namespace SFS.Parts.Modules
         {
             List<SmokeTrail.Point> points = trail.points;
             int last = points.Count - 1;
-            if (last < (trail.Emitting ? 0 : 1))
+            if (last < 0)
                 return;
 
             Node newer = new(trail.Emitting ? trail.head : points[last], anchor, now, trail.keepVisible);
@@ -479,6 +556,14 @@ namespace SFS.Parts.Modules
                 fromHead += AddSegment(newer, older, fromHead, cone, open, trail, view, ref direction);
                 newer = older;
             }
+
+            // The smoke the oldest point has taken in, as a blob around it as wide as it has spread, and far enough from the head that its cone
+            // doesn't cut into it
+            if (points[0].mass > 0 && !points[0].grounded)
+            {
+                Node pile = new(points[0], anchor, now, trail.keepVisible);
+                AddSegment(pile, pile, fromHead + 2 * pile.radius + trail.fadeIn, new Vector2(0, 1e9f), Vector2.one, trail, view, ref direction);
+            }
         }
 
         // One quad per segment, reaching past both ends by the cap its smoke is spread over
@@ -489,11 +574,19 @@ namespace SFS.Parts.Modules
             if (length > 1e-4f)
                 direction = delta / length;
 
-            if (vertices.Count >= MaxSegments * 4)
+            if (vertexCount >= MaxSegments * 4)
                 return length;
 
             float cap = Mathf.Max(newer.radius, older.radius);
-            float halfWidth = cap * QuadWidth;
+
+            // Half-widths at its newer and older end: a trapezoid just around the furthest the edges reach, past each end at that end's
+            // radius and in between running from one to the other
+            float newerReach = edgeReach * newer.radius;
+            float olderReach = edgeReach * (length > 0 ? older.radius : newer.radius);
+            float spread = Mathf.Abs(newerReach - olderReach) * cap / Mathf.Max(length + cap, 1e-6f);
+            float newerWidth = newerReach > olderReach ? newerReach + spread : newerReach;
+            float olderWidth = olderReach > newerReach ? olderReach + spread : olderReach;
+            float halfWidth = Mathf.Max(cap, Mathf.Max(newerWidth, olderWidth));
 
             // Off screen
             Vector2 min = Vector2.Min(newer.position, older.position) - Vector2.one * halfWidth;
@@ -507,32 +600,42 @@ namespace SFS.Parts.Modules
                 return length;
 
             Vector2 across = new(-direction.y, direction.x);
-            int start = vertices.Count;
-            float distortion = GetDistortion(newer, older, delta, length);
+            Vector4 shape = new(length, cap, newer.radius, older.radius);
+            Vector4 smoke = new(newer.mass, newer.fade, older.fade, trail.fadeIn);
+            Vector4 carried = GetCarried(newer.carried, older.carried, NoiseTile);
+            Vector3 speed = new(newer.speed, older.speed, GetDistortion(newer, older, delta, length));
+            Vector2 ground = new(newer.ground, older.ground);
+            hasGround |= newer.ground > 0 || older.ground > 0;
+
+            if (vertexCount + 4 > vertices.Length)
+                System.Array.Resize(ref vertices, Mathf.Min(vertices.Length * 2, MaxSegments * 4));
+
+            // A segment too short to span its cap is drawn as a round blob, whose edges reach as far along it as across
+            float ends = length > cap * 1e-3f ? cap : Mathf.Max(cap, Mathf.Max(newerWidth, olderWidth));
 
             for (int corner = 0; corner < 4; corner++)
             {
-                float t = corner < 2 ? -cap : length + cap;
-                float y = corner == 0 || corner == 3 ? -halfWidth : halfWidth;
+                float t = corner < 2 ? -ends : length + ends;
+                float width = corner < 2 ? newerWidth : olderWidth;
+                float y = corner == 0 || corner == 3 ? -width : width;
+                Vector2 position = newer.position + direction * t + across * y;
+                boundsMin = Vector2.Min(boundsMin, position);
+                boundsMax = Vector2.Max(boundsMax, position);
 
-                vertices.Add(newer.position + direction * t + across * y);
-                colors.Add(trail.color);
-                segments.Add(new Vector4(t, y, fromHead + t, older.random));
-                shapes.Add(new Vector4(length, cap, newer.radius, older.radius));
-                smokes.Add(new Vector4(newer.mass, newer.fade, older.fade, trail.fadeIn));
-                carried.Add(GetCarried(newer.carried, older.carried, NoiseTile));
-                speeds.Add(new Vector4(newer.speed, older.speed, distortion));
-                cones.Add(cone);
-                ends.Add(open);
-                grounds.Add(new Vector2(newer.ground, older.ground));
+                vertices[vertexCount++] = new Vertex
+                {
+                    position = position,
+                    color = trail.color,
+                    segment = new Vector4(t, y, fromHead + t, older.random),
+                    shape = shape,
+                    smoke = smoke,
+                    carried = carried,
+                    ends = open,
+                    speed = speed,
+                    cone = cone,
+                    ground = ground,
+                };
             }
-
-            indices.Add(start);
-            indices.Add(start + 1);
-            indices.Add(start + 2);
-            indices.Add(start);
-            indices.Add(start + 2);
-            indices.Add(start + 3);
 
             return length;
         }
@@ -598,6 +701,7 @@ namespace SFS.Parts.Modules
             public float hidden;     // how much of it doesn't show yet when let go: in thin air it only shows as it puffs out
             public bool grounded;    // the ground has turned it aside
             public float groundedFor; // s since, while that matters to SmokeTrails
+            public float grown;      // m wider than its age makes it, where smoke merged into it would otherwise pile up past PileDepth
 
             public float GetRadius(double now)
             {
@@ -606,7 +710,7 @@ namespace SFS.Parts.Modules
                 return GetSwollenRadius(now) + expansion * minutes * Mathf.Sqrt(minutes);
             }
 
-            public float GetSwollenRadius(double now) => radius * GetSwelling(now);
+            public float GetSwollenRadius(double now) => radius * GetSwelling(now) + grown;
 
             // How much wider it has puffed out than it was let go
             public float GetSwelling(double now) => 1 + swell * (1 - Mathf.Exp(-Age(now) / swellTime));
@@ -617,11 +721,49 @@ namespace SFS.Parts.Modules
                 return shown * (1 - Mathf.SmoothStep(0, 1, Mathf.InverseLerp(0.5f, 1, Age(now) / lifetime)));
             }
             float Age(double now) => Mathf.Max(0, (float)(now - time));
+
+            // Two bunched points as one, where and as old as their smoke is, weighted by how much each carries, so a pile keeps its place
+            // as smoke joins it; and spread wider where its smoke would pile up past PileDepth. Smoke still in the flame stays where it is
+            public static Point Merge(in Point older, in Point newer, double now)
+            {
+                Point merged = newer;
+                merged.mass = older.mass + newer.mass;
+                if (older.held || newer.held)
+                    return merged;
+
+                float w = merged.mass > 0 ? older.mass / merged.mass : 0.5f;
+                merged.position = newer.position + (older.position - newer.position) * w;
+                merged.carried = newer.carried + (older.carried - newer.carried) * w;
+                merged.velocity = Vector2.Lerp(newer.velocity, older.velocity, w);
+                merged.grown = Mathf.Lerp(newer.grown, older.grown, w);
+                merged.time = newer.time + (older.time - newer.time) * w;
+                merged.radius = Mathf.Lerp(newer.radius, older.radius, w);
+                merged.swell = Mathf.Lerp(newer.swell, older.swell, w);
+                merged.swellTime = Mathf.Lerp(newer.swellTime, older.swellTime, w);
+                merged.expansion = Mathf.Lerp(newer.expansion, older.expansion, w);
+                merged.drag = Mathf.Lerp(newer.drag, older.drag, w);
+                merged.lifetime = Mathf.Lerp(newer.lifetime, older.lifetime, w);
+                merged.hidden = Mathf.Lerp(newer.hidden, older.hidden, w);
+                merged.spread = Mathf.Lerp(newer.spread, older.spread, w);
+                if (w > 0.5f)
+                {
+                    merged.side = older.side;
+                    merged.grounded = older.grounded;
+                    merged.groundedFor = older.groundedFor;
+                }
+
+                // A blob of it peaks at 3 / π mass / r² deep
+                float needed = Mathf.Sqrt(0.955f * merged.mass / PileDepth), wide = merged.GetRadius(now);
+                if (wide < needed)
+                    merged.grown += needed - wide;
+                return merged;
+            }
         }
 
         const float EmitInterval = 0.1f; // s
         const int MaxPoints = 2000;
         const float MergeDistance = 0.7f; // of the radius
+        const float PileDepth = 10; // optical depth merged smoke spreads out rather than pile up past
         const float MinSpeed = 0.5f; // m/s, below which a point settles
         const float MinSpread = -0.05f, MaxSpread = 1.1f; // run-off speed, of the speed it hit the ground with
         const float SpreadPeriod = 2; // s per sweep from fastest to slowest
@@ -813,20 +955,47 @@ namespace SFS.Parts.Modules
             if (expired > 0)
                 points.RemoveRange(0, expired);
 
-            // Points bunched up closer than their smoke is wide add nothing but overdraw
-            for (int i = points.Count - 2; i >= 1; i--)
+            // The oldest takes in smoke that comes to rest with it in the air and shows it as its own, so a pile stays one point
+            if (points.Count >= 2)
             {
-                Point a = points[i - 1], b = points[i], c = points[i + 1];
+                Point a = points[0], b = points[1];
+                double reach = MergeDistance * b.GetRadius(now);
+                if (!a.held && !b.held && !a.grounded && !b.grounded && (b.position - a.position).sqrMagnitude < reach * reach)
+                {
+                    points[0] = Point.Merge(a, b, now);
+                    points.RemoveAt(1);
+                }
+            }
+
+            // Points bunched up closer than their smoke is wide add nothing but overdraw. Walked from the newest, with the points
+            // kept packed at the end and the next older one checked against the last kept
+            int count = points.Count;
+            if (count < 3)
+                return;
+
+            int kept = count - 1;
+            for (int i = count - 2; i >= 1; i--)
+            {
+                Point a = points[i - 1], b = points[i], c = points[kept];
                 double limit = MergeDistance * b.GetRadius(now);
                 limit *= limit;
 
                 if ((c.position - a.position).sqrMagnitude < limit && (b.position - a.position).sqrMagnitude < limit)
                 {
-                    c.mass += b.mass;
-                    points[i + 1] = c;
-                    points.RemoveAt(i);
+                    if (b.grounded || c.grounded)
+                    {
+                        c.mass += b.mass;
+                        points[kept] = c;
+                    }
+                    else
+                        points[kept] = Point.Merge(b, c, now);
                 }
+                else
+                    points[--kept] = b;
             }
+            points[--kept] = points[0];
+            if (kept > 0)
+                points.RemoveRange(0, kept);
         }
 
         bool MayHitGround(in Point point)

@@ -363,10 +363,12 @@ namespace SFS.Parts
         public void ApplyPushing(ThrustBase engine)
         {
             Vector2 thrustPoint = Transform_Utility.LocalToLocalPoint(engine, Rocket, engine.ThrustPosition);
-            Vector2 thrustDirection = Transform_Utility.LocalToLocalDirection(engine, Rocket, engine.ThrustNormal).normalized;
+            Vector2 thrustDirection = Transform_Utility.LocalToLocalDirection(engine, Rocket, engine.ThrustNormal).normalized * engine.transform.localScale;
             Vector2 force = thrustDirection * (float)(engine.ThrottleOut.Value * engine.ThrustAmount * -0.5);
             Rocket.rb2d.AddForceAtPosition(force, thrustPoint, ForceMode2D.Force);
+            #if UNITY_EDITOR
             Debug.DrawRay(thrustPoint, force, Color.red);
+            #endif
         }
         
         // Magnet gizmos
