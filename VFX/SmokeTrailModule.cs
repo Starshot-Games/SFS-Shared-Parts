@@ -58,9 +58,9 @@ namespace SFS.Parts.Modules
         // How thick its smoke comes out where it is now, per m of nozzle at full throttle
         public float Output { get; private set; }
 
-        SmokeTrail ownTrail, groupTrail;
+        SmokeTrail trail;
         const int GroundStreams = 4; // per side where the plume hits the ground
-        readonly SmokeTrail[] ownGroundTrails = new SmokeTrail[GroundStreams * 2 - 1], groupGroundTrails = new SmokeTrail[GroundStreams * 2 - 1];
+        readonly SmokeTrail[] groundTrails = new SmokeTrail[GroundStreams * 2 - 1];
         const int GroundSamples = 12; // down the plume
         const int WideningSamples = 4; // down the plume, from where the smoke shows to where the flame fades out
         readonly Double2[] groundSamples = new Double2[GroundSamples];
@@ -86,44 +86,23 @@ namespace SFS.Parts.Modules
             }
             Output = thickness * Mathf.Pow(density, densityFalloff) * thinOut;
 
-            // This jet's smoke hands over to the merged plume's as it merges with its neighbours, as the flame itself does, by how far
-            // into the merge it is where its own smoke sets off. One flame of the group sends out the merged plume's smoke for all of them.
             flame.GetPlume(out PlumeState plume);
-            PlumeMath.FindFade(ref plume, false, fadeInFrom, fadeInTo, Unseen, out float ownStart, out float ownEnd, out float ownGone);
-            float merged = PlumeMath.GetMergeAt(plume, ownStart);
+            PlumeMath.FindFade(ref plume, fadeInFrom, fadeInTo, Unseen, out float fadeStart, out float fadeEnd, out float gone);
 
             // The flame fades out as its smoke thickens in, as much as that smoke shows there, so it doesn't shine through it
-            flame.smokeCover = new Vector3(ownStart, ownEnd, inAir * (1 - GetHidden(thinOut)));
-            Emit(ref plume, ref ownTrail, ownGroundTrails, false, ownStart, ownEnd, ownGone, 1 - merged, planet, density, thinOut);
-
-            if (flame.merge.amount > 0 && flame.merge.leadsSmoke)
-            {
-                PlumeMath.FindFade(ref plume, true, fadeInFrom, fadeInTo, Unseen, out float groupStart, out float groupEnd, out float groupGone);
-                Emit(ref plume, ref groupTrail, groupGroundTrails, true, groupStart, groupEnd, groupGone, merged * flame.merge.smokeNozzles, planet, density, thinOut);
-            }
-            else
-            {
-                EndTrail(ref groupTrail);
-                EndTrails(groupGroundTrails);
-            }
+            flame.smokeCover = new Vector3(fadeStart, fadeEnd, inAir * (1 - GetHidden(thinOut)));
+            Emit(ref plume, fadeStart, fadeEnd, gone, planet, density, thinOut);
         }
 
-        // Feeds a trail from this jet's own plume or the group's merged one, putting out the given share of a nozzle's smoke
-        void Emit(ref PlumeState plume, ref SmokeTrail trail, SmokeTrail[] groundTrails, bool group, float fadeStart, float fadeEnd, float gone, float share, Planet planet, float density, float thinOut)
+        // Feeds the trail from the plume
+        void Emit(ref PlumeState plume, float fadeStart, float fadeEnd, float gone, Planet planet, float density, float thinOut)
         {
-            if (share < 1e-3f)
-            {
-                EndTrail(ref trail);
-                EndTrails(groundTrails);
-                return;
-            }
-
             // Smoke from a plume that hits the ground before it would show comes out there and spreads along it
-            float fadedOut = PlumeMath.GetFadedOutMeshY(plume, group);
-            float letGo = GetLetGo(plume, group, fadeEnd, gone);
+            float fadedOut = PlumeMath.GetFadedOutMeshY(plume);
+            float letGo = GetLetGo(plume, fadeEnd, gone);
             float ground;
             using (GroundMarker.Auto())
-                ground = FindGround(plume, group, planet, letGo);
+                ground = FindGround(plume, planet, letGo);
             bool grounded = ground < fadeEnd;
             float groundDepth = 0;
             if (grounded)
@@ -134,29 +113,28 @@ namespace SFS.Parts.Modules
             }
 
             // Follows the plume as it dims, some way into its tail or until the ground
-            PlumeMath.GetCrossSection(plume, 0, group, out Vector2 nozzle, out _, out _);
-            PlumeMath.GetCrossSection(plume, fadeStart, group, out Vector2 localStart, out float halfWidth, out float startDistance);
-            PlumeMath.GetCrossSection(plume, Mathf.Max(fadeStart - 0.05f * fadedOut, 0), group, out Vector2 upstream, out _, out _);
-            PlumeMath.GetCrossSection(plume, fadeEnd, group, out _, out _, out float endDistance);
-            PlumeMath.GetCrossSection(plume, ground, group, out Vector2 release, out _, out float releaseDistance);
+            PlumeMath.GetCrossSection(plume, 0, out Vector2 nozzle, out _, out _);
+            PlumeMath.GetCrossSection(plume, fadeStart, out Vector2 localStart, out float halfWidth, out float startDistance);
+            PlumeMath.GetCrossSection(plume, Mathf.Max(fadeStart - 0.05f * fadedOut, 0), out Vector2 upstream, out _, out _);
+            PlumeMath.GetCrossSection(plume, fadeEnd, out _, out _, out float endDistance);
+            PlumeMath.GetCrossSection(plume, ground, out Vector2 release, out _, out float releaseDistance);
 
             Double2 birth = WorldView.ToGlobalPosition(localStart);
             if (IsUnderwater(planet, birth))
             {
-                EndTrail(ref trail);
-                EndTrails(groundTrails);
+                EndTrails();
                 return;
             }
 
-            float throttle = group ? flame.merge.throttle : flame.appliedThrottle;
+            float throttle = flame.appliedThrottle;
             float scaleX = transform.TransformVector(Vector3.right).magnitude;
-            float size = PlumeMath.GetNozzleRadius(plume, group); // shared by a merged group, so its smoke moves and spreads as one
+            float size = PlumeMath.GetNozzleRadius(plume);
 
             Vector2 axis = localStart - upstream;
             Vector2 direction = axis.sqrMagnitude > 1e-8f ? axis.normalized : (Vector2)transform.TransformDirection(Vector3.down);
             float speed = jetSpeed * size;
             Vector2 velocity = GetFlameVelocity(localStart) + direction * speed;
-            float radius = FlameEdge * GetDrawnHalfWidth(plume, fadeStart, group, halfWidth);
+            float radius = FlameEdge * halfWidth;
             float seaLevelRadius = FlameEdge * scaleX * FlameMeshModule.GetFlameWidth(0.5f, flame.exitPressure, 1, flame.airSpread, 1, flame.DiamondOffset);
 
             // How wide the flame gets on down to where it fades out or meets the ground, which the smoke still within it spreads out to,
@@ -166,15 +144,15 @@ namespace SFS.Parts.Modules
             for (int i = 1; i <= WideningSamples; i++)
             {
                 float meshY = Mathf.Lerp(fadeStart, reach, (float)i / WideningSamples);
-                PlumeMath.GetCrossSection(plume, meshY, group, out _, out float width, out float distance);
-                float edge = FlameFill * GetDrawnHalfWidth(plume, meshY, group, width);
+                PlumeMath.GetCrossSection(plume, meshY, out _, out float width, out float distance);
+                float edge = FlameFill * width;
                 widest = Mathf.Max(widest, edge);
                 widening = Mathf.Max(widening, (edge - radius) / Mathf.Max(distance - startDistance, 0.1f * radius));
             }
-            PlumeMath.GetCrossSection(plume, reach, group, out _, out _, out float reachDistance);
+            PlumeMath.GetCrossSection(plume, reach, out _, out _, out float reachDistance);
 
             // Put out at the rate that gives a trail left at the reference speed its thickness
-            float massRate = thickness * throttle * share * Mathf.Pow(density, densityFalloff) * thinOut * ReferenceSpeed * seaLevelRadius / 0.9375f * Mathf.Lerp(inAir, 1, groundDepth);
+            float massRate = thickness * throttle * Mathf.Pow(density, densityFalloff) * thinOut * ReferenceSpeed * seaLevelRadius / 0.9375f * Mathf.Lerp(inAir, 1, groundDepth);
             float expansionAfterAMinute = expansion * size / Mathf.Sqrt(Mathf.Max(density, fastestSpreadAt));
             float drag = Mathf.Max(density, MinDensity) / dragTime;
 
@@ -216,7 +194,7 @@ namespace SFS.Parts.Modules
                     fed = SmokeTrails.StartTrail(material, planet, fedSide, fedPhase);
                 }
 
-                Carry(plume, fed, group, nozzle, direction, speed, releaseDistance, reachDistance, widest, now);
+                Carry(plume, fed, nozzle, direction, speed, releaseDistance, reachDistance, widest, now);
 
                 fed.color = color;
                 fed.keepVisible = keepVisible;
@@ -230,25 +208,14 @@ namespace SFS.Parts.Modules
         static float GetHidden(float thinOut) => Mathf.Clamp01(2 * (1 - thinOut));
 
         // meshY where the flame lets go of the smoke it carries: some way into its tail, unless it's gone before
-        float GetLetGo(in PlumeState plume, bool group, float fadeEnd, float gone) => Mathf.Min(Mathf.Lerp(fadeEnd, PlumeMath.GetFadedOutMeshY(plume, group), holdInTail), gone);
-
-        // Half-width of the plume as it's drawn at meshY: this jet's own widens into the merged plume's as it merges with its neighbours
-        static float GetDrawnHalfWidth(in PlumeState plume, float meshY, bool group, float halfWidth)
-        {
-            float merged = group ? 0 : PlumeMath.GetMergeAt(plume, meshY);
-            if (merged <= 0)
-                return halfWidth;
-
-            float groupHalfWidth = PlumeMath.Sample(plume, meshY, true).halfWidth * plume.scaleX;
-            return Mathf.Lerp(halfWidth, Mathf.Max(halfWidth, groupHalfWidth), merged);
-        }
+        float GetLetGo(in PlumeState plume, float fadeEnd, float gone) => Mathf.Min(Mathf.Lerp(fadeEnd, PlumeMath.GetFadedOutMeshY(plume), holdInTail), gone);
 
         // meshY where it first hits the ground, or end
-        float FindGround(in PlumeState plume, bool group, Planet planet, float end)
+        float FindGround(in PlumeState plume, Planet planet, float end)
         {
             const int Refinements = 5;
 
-            PlumeMath.GetCrossSection(plume, end, group, out _, out _, out float reach);
+            PlumeMath.GetCrossSection(plume, end, out _, out _, out float reach);
             double nozzleHeight = WorldView.ToGlobalPosition(transform.position).magnitude - planet.Radius;
             if (nozzleHeight > System.Math.Max(planet.maxTerrainHeight, 0) + reach + 1)
                 return end;
@@ -261,7 +228,7 @@ namespace SFS.Parts.Modules
                 double[] angles = chunkAngles[count];
                 for (int c = 0; c < count; c++)
                 {
-                    PlumeMath.GetCrossSection(plume, end * (first + c + 1) / GroundSamples, group, out Vector2 local, out _, out _);
+                    PlumeMath.GetCrossSection(plume, end * (first + c + 1) / GroundSamples, out Vector2 local, out _, out _);
                     groundSamples[first + c] = WorldView.ToGlobalPosition(local);
                     angles[c] = groundSamples[first + c].AngleRadians;
                 }
@@ -280,7 +247,7 @@ namespace SFS.Parts.Modules
                     for (int j = 0; j < Refinements; j++)
                     {
                         float middle = (above + below) / 2;
-                        if (IsBelowSurface(plume, planet, group, middle))
+                        if (IsBelowSurface(plume, planet, middle))
                             below = middle;
                         else
                             above = middle;
@@ -322,9 +289,9 @@ namespace SFS.Parts.Modules
             return false;
         }
 
-        static bool IsBelowSurface(in PlumeState plume, Planet planet, bool group, float meshY)
+        static bool IsBelowSurface(in PlumeState plume, Planet planet, float meshY)
         {
-            PlumeMath.GetCrossSection(plume, meshY, group, out Vector2 local, out _, out _);
+            PlumeMath.GetCrossSection(plume, meshY, out Vector2 local, out _, out _);
             Double2 position = WorldView.ToGlobalPosition(local);
             return position.magnitude < planet.Radius + planet.GetTerrainHeightAtAngle(position.AngleRadians, true);
         }
@@ -341,7 +308,7 @@ namespace SFS.Parts.Modules
 
         // Carries the smoke still in the flame down it and lets it go at releaseDistance. Smoke let go but still within the flame's reach,
         // narrower than the widest it gets, spreads out as wide as the flame is drawn where it is
-        void Carry(in PlumeState plume, SmokeTrail trail, bool group, Vector2 nozzle, Vector2 direction, float speed, float releaseDistance, float reach, float widest, double now)
+        void Carry(in PlumeState plume, SmokeTrail trail, Vector2 nozzle, Vector2 direction, float speed, float releaseDistance, float reach, float widest, double now)
         {
             float step = speed * physicsStep;
             List<SmokeTrail.Point> points = trail.points;
@@ -361,16 +328,15 @@ namespace SFS.Parts.Modules
                         continue;
 
                     float alongY = PlumeMath.GetMeshY(plume, along);
-                    PlumeMath.GetCrossSection(plume, alongY, group, out _, out float width, out _);
-                    point.radius = Mathf.Max(point.radius, FlameFill * GetDrawnHalfWidth(plume, alongY, group, width) / point.GetSwelling(now));
+                    PlumeMath.GetCrossSection(plume, alongY, out _, out float width, out _);
+                    point.radius = Mathf.Max(point.radius, FlameFill * width / point.GetSwelling(now));
                     points[i] = point;
                     continue;
                 }
 
                 point.along += step;
                 float meshY = PlumeMath.GetMeshY(plume, point.along);
-                PlumeMath.GetCrossSection(plume, meshY, group, out Vector2 local, out float halfWidth, out _);
-                halfWidth = GetDrawnHalfWidth(plume, meshY, group, halfWidth);
+                PlumeMath.GetCrossSection(plume, meshY, out Vector2 local, out float halfWidth, out _);
 
                 Double2 position = WorldView.ToGlobalPosition(local);
                 point.carried += position - point.position;
@@ -455,10 +421,8 @@ namespace SFS.Parts.Modules
 
         void EndTrails()
         {
-            EndTrail(ref ownTrail);
-            EndTrail(ref groupTrail);
-            EndTrails(ownGroundTrails);
-            EndTrails(groupGroundTrails);
+            EndTrail(ref trail);
+            EndTrails(groundTrails);
         }
 
         static void EndTrails(SmokeTrail[] trails)

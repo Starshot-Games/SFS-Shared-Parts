@@ -85,8 +85,7 @@ namespace SFS.Parts.Modules
 
 
         // Driven by EngineEffects, after the flames - it gathers throttle/vacuum once and pushes them in here.
-        // visibility is its flame's: under 1 while a brighter flame burning alongside drowns it out.
-        public unsafe void Apply(float throttle, float vacuum, float visibility = 1)
+        public unsafe void Apply(float throttle, float vacuum)
         {
             if (glow == null || flame == null)
                 return;
@@ -109,14 +108,13 @@ namespace SFS.Parts.Modules
             flame.GetPlume(out PlumeState plume);
             Matrix4x4 toGlow = space.worldToLocalMatrix * plume.toWorld;
             float toLocal = 1 / Mathf.Max(space.TransformVector(Vector3.right).magnitude, 1e-6f);
-            float nozzle = PlumeMath.GetNozzleRadius(plume, false) * toLocal;
+            float nozzle = PlumeMath.GetNozzleRadius(plume) * toLocal;
             float bloomRadius = data.bloomRadius * nozzle;
             float haloRadius = data.haloRadius * nozzle;
             float exitRadius = data.exitRadius * nozzle;
 
             // Slabs packed closer at the nozzle, where the plume is brightest and narrowest, on past where it fades into its afterglow
-            bool merging = plume.merge.amount > 0;
-            float fadedOut = merging ? Mathf.Max(PlumeMath.GetFadedOutMeshY(plume, false), PlumeMath.GetFadedOutMeshY(plume, true)) : PlumeMath.GetFadedOutMeshY(plume, false);
+            float fadedOut = PlumeMath.GetFadedOutMeshY(plume);
             float end = fadedOut * (1 + data.afterglowLength);
             float eddyStream = Time.time * flame.GetEddyFlow(); // plume lengths the eddies have streamed
             for (int i = 0; i < Slabs; i++)
@@ -194,7 +192,7 @@ namespace SFS.Parts.Modules
 
             float flickering = Mathf.Max(1 + flicker * flame.FlickerNoise, 0);
             Color color = data.color;
-            color.a = adjThrottle * visibility * flickering;
+            color.a = adjThrottle * flickering;
 
             propertyBlock ??= new MaterialPropertyBlock();
             glow.GetPropertyBlock(propertyBlock);
