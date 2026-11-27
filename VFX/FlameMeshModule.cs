@@ -24,7 +24,6 @@ namespace SFS.Parts.Modules
             NoiseSeed = Shader.PropertyToID("noiseSeed"),
             EddyOffset = Shader.PropertyToID("eddyOffset"),
             EddyFlicker = Shader.PropertyToID("eddyFlicker"),
-            SootProperty = Shader.PropertyToID("_Soot"),
             DiamondOffsetProperty = Shader.PropertyToID("diamondOffset"),
             FlameColorProperty = Shader.PropertyToID("_FlameColor"),
             FlameMaskProperty = Shader.PropertyToID("_FlameMask"),
@@ -32,6 +31,7 @@ namespace SFS.Parts.Modules
             ExitPressureProperty = Shader.PropertyToID("exitPressure"),
             AtmospherePressureProperty = Shader.PropertyToID("atmospherePressure"),
             AirTermsProperty = Shader.PropertyToID("airTerms"),
+            WidthTermsProperty = Shader.PropertyToID("widthTerms"),
             IsMachDiamondsProperty = Shader.PropertyToID("isMachDiamondsShader");
         
         
@@ -52,8 +52,6 @@ namespace SFS.Parts.Modules
         [Space]
         public float stripesWidth = 1;
         [Range(0, 3)] public float stripesStrength = 1;
-        [Tooltip("Whether this flame streaks the material's soot near the nozzle")]
-        public bool sootStreaks = true;
 
         [Space]
         [Tooltip("How much the plume's brightness flickers")]
@@ -210,6 +208,7 @@ namespace SFS.Parts.Modules
             PlumeState plume = default;
             FillPlumeParams(ref plume);
             Vector4 airTerms = new(PlumeMath.GetTailPresence(atmospherePressure), PlumeMath.GetTailChurn(atmospherePressure), PlumeMath.GetTailStart(atmospherePressure), Mathf.Sqrt(Mathf.Clamp01(atmospherePressure)));
+            Vector4 widthTerms = PlumeMath.GetWidthTerms(exitPressure, throttle, atmospherePressure, plume.diamondOffset);
 
             // Set
             foreach (MeshRef a in meshRenderers)
@@ -235,13 +234,12 @@ namespace SFS.Parts.Modules
 
                 propertyBlock.SetFloat(AtmospherePressureProperty, atmospherePressure); // 1 bar at ground -> 0 in vacuum, falling off exponentially with height
                 propertyBlock.SetVector(AirTermsProperty, airTerms);
+                propertyBlock.SetVector(WidthTermsProperty, widthTerms);
 
                 propertyBlock.SetFloat(IsMachDiamondsProperty, a.machDiamondsMesh? 1 : 0);
                 
                 propertyBlock.SetFloat(StripesWidth, stripesWidth);
                 propertyBlock.SetFloat(StripesStrength, stripesStrength);
-                if (!sootStreaks)
-                    propertyBlock.SetFloat(SootProperty, 0);
 
                 propertyBlock.SetFloat(NoiseSeed, noiseSeed);
                 propertyBlock.SetFloat(FlickerProperty, flicker * FlickerNoise);

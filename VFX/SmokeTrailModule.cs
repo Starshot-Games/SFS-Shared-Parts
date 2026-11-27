@@ -15,6 +15,7 @@ namespace SFS.Parts.Modules
         const float FlameFill = 1.2f; // of the flame's half-width, how wide the smoke in its reach is drawn, so its thinning edge shows about where the flame's does
         const float MinDensity = 0.25f; // however thin the air, it still slows the smoke as if at least this thick
         const float Unseen = 0.005f; // of the flame's brightness at the nozzle, where it no longer shows
+        const float QuietTime = 1; // s its smoke has to stay unseen before its trails are let go
 
         [Required] public FlameMeshModule flame;
         [Required] public Material material;
@@ -70,6 +71,7 @@ namespace SFS.Parts.Modules
         Rigidbody2D body;
         float physicsTime = float.NaN; // Time.fixedTime last frame
         float physicsStep;             // s of physics run since then: the smoke in the flame moves on it, as the smoke let go does
+        double lastShown = double.NegativeInfinity; // world time its smoke last showed
 
         void LateUpdate()
         {
@@ -112,6 +114,17 @@ namespace SFS.Parts.Modules
                 fadeStart = Mathf.Min(fadeStart, ground);
             }
 
+            // Smoke that hasn't shown for a while, as in air where none shows, isn't put out or kept up at all
+            double now = WorldTime.main.worldTime;
+            float shown = Mathf.Lerp(inAir, 1, groundDepth);
+            if (thickness * shown > 0)
+                lastShown = now;
+            else if (now - lastShown > QuietTime)
+            {
+                EndTrails();
+                return;
+            }
+
             // Follows the plume as it dims, some way into its tail or until the ground
             PlumeMath.GetCrossSection(plume, 0, out Vector2 nozzle, out _, out _);
             PlumeMath.GetCrossSection(plume, fadeStart, out Vector2 localStart, out float halfWidth, out float startDistance);
@@ -152,7 +165,7 @@ namespace SFS.Parts.Modules
             PlumeMath.GetCrossSection(plume, reach, out _, out _, out float reachDistance);
 
             // Put out at the rate that gives a trail left at the reference speed its thickness
-            float massRate = thickness * throttle * Mathf.Pow(density, densityFalloff) * thinOut * ReferenceSpeed * seaLevelRadius / 0.9375f * Mathf.Lerp(inAir, 1, groundDepth);
+            float massRate = thickness * throttle * Mathf.Pow(density, densityFalloff) * thinOut * ReferenceSpeed * seaLevelRadius / 0.9375f * shown;
             float expansionAfterAMinute = expansion * size / Mathf.Sqrt(Mathf.Max(density, fastestSpreadAt));
             float drag = Mathf.Max(density, MinDensity) / dragTime;
 
@@ -162,7 +175,6 @@ namespace SFS.Parts.Modules
                 intoGround = ground < letGo || CarriesIntoGround(planet, release, velocity / drag);
             using ProfilerMarker.AutoScope feedScope = FeedMarker.Auto();
 
-            double now = WorldTime.main.worldTime;
             float hidden = GetHidden(thinOut);
             bool existing = trail != null && !trail.Removed;
             float side = existing ? trail.side : Random.value < 0.5f ? -1 : 1;

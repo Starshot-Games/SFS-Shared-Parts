@@ -54,8 +54,17 @@ namespace SFS.Parts.Modules
         // The plume's drawn length in local units (matches the y scale in VertCore).
         public static float GetPlumeLength(float exitPressure) => 12 * exitPressure * 3 * 2;
 
+        // Shock diamonds come from over-expansion: they grow as ambient pressure exceeds the flame's, and vanish at perfect expansion or in vacuum
         static float GetDiamondsStrength(float flamePressure, float ambientPressure)
             => Mathf.Clamp01(Mathf.Max(ambientPressure - flamePressure, 0f) * 2f);
+
+        // How far the shock diamonds ripple the plume's half-width
+        static float GetRipple(float exitPressure, float throttle, float atmospherePressure)
+            => GetDiamondsStrength(GetFlamePressure(exitPressure, throttle), GetAmbientPressure(atmospherePressure)) * 0.3f * exitPressure * 3f;
+
+        // What the shader's GetFlameWidth takes that doesn't change down the plume: its slope, billow, base and shock ripple
+        public static Vector4 GetWidthTerms(float exitPressure, float throttle, float atmospherePressure, float diamondOffset)
+            => new Envelope(exitPressure, throttle, 0, atmospherePressure).GetShaderTerms(GetRipple(exitPressure, throttle, atmospherePressure), Mathf.Abs(Mathf.Sin(-diamondOffset * Mathf.PI)));
 
         public static float GetFlamePressure(float exitPressure, float throttle) => exitPressure * Mathf.Lerp(0.1f, 1f, throttle);
         public static float GetAmbientPressure(float atmospherePressure) => Mathf.Max(atmospherePressure, 1e-3f);
@@ -73,7 +82,7 @@ namespace SFS.Parts.Modules
                 y = Mathf.Clamp01(y);
                 float diamonds = Mathf.Abs(Mathf.Sin((y * diamondCount - diamondOffset) * Mathf.PI))
                                  - Mathf.Abs(Mathf.Sin(-diamondOffset * Mathf.PI));
-                width += diamonds * GetDiamondsStrength(GetFlamePressure(exitPressure, throttle), GetAmbientPressure(atmospherePressure)) * 0.3f * exitPressure * 3f;
+                width += diamonds * GetRipple(exitPressure, throttle, atmospherePressure);
             }
 
             return width;
@@ -88,7 +97,7 @@ namespace SFS.Parts.Modules
             {
                 const float gamma = 1.2f;
 
-                // Vac / underexpanded billow
+                // Vac / underexpanded billow: it widens until its pressure (~ width^(-2 gamma)) falls to ambient
                 float pressureRatio = GetFlamePressure(exitPressure, throttle) / GetAmbientPressure(atmospherePressure);
                 billow = (Mathf.Pow(Mathf.Max(pressureRatio, 1f), 1f / (2f * gamma)) - 1f) * 1.3f;
                 billowStart = billow * Mathf.Sqrt(0.05f);
@@ -110,6 +119,10 @@ namespace SFS.Parts.Modules
 
                 return 1f + width * scale + spread * (spreadY < 1 ? 0.5f * spreadY * spreadY : spreadY - 0.5f);
             }
+
+            // GetWidth folded for the shader as base + slope * y + billow * sqrt(y + 0.05) + ripple * diamonds, its spread in air left out
+            public Vector4 GetShaderTerms(float ripple, float rippleBase)
+                => new(0.5f * scale, billow * scale, 1f - billowStart * scale - ripple * rippleBase, ripple);
         }
 
         // Mirror of GetEdgeCover in the flame shader: how far past its outline a softened edge's mesh reaches, of its half-width

@@ -15,16 +15,19 @@ namespace SFS.Parts.Modules
 
         const int KeepUnused = 120; // frames a camera keeps its textures without any plume to draw
 
+        // How many times coarser than the screen the plumes are drawn at; the composite spreads them back over it bilinearly
+        public static int downsample = 2;
+
         static readonly int Layer = Shader.PropertyToID("_FlameLayer"), Light = Shader.PropertyToID("_FlameLight");
 
         // A camera's own two textures. Not temporary ones: those go back to the pool once the command buffer is done, long before the
-        // quad reads them, and the next buffer to ask for the same kind is handed them - the smoke's, which then draws into them
+        // quad reads them, and the next buffer to ask for the same kind is handed them and draws into them
         class Targets
         {
             public RenderTexture layer, light;
             public int lastUsed;
 
-            public bool Fits(Camera camera, RenderTextureFormat format) => layer != null && layer.width == camera.pixelWidth && layer.height == camera.pixelHeight && layer.format == format;
+            public bool Fits(int width, int height, RenderTextureFormat format) => layer != null && layer.width == width && layer.height == height && layer.format == format;
 
             public void Release()
             {
@@ -293,12 +296,16 @@ namespace SFS.Parts.Modules
             RenderTextureFormat format = camera.allowHDR ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32;
             if (!textures.TryGetValue(camera, out Targets owned))
                 textures.Add(camera, owned = new Targets());
-            if (!owned.Fits(camera, format))
+            int resolution = Mathf.Max(downsample, 1);
+            int width = (camera.pixelWidth + resolution - 1) / resolution, height = (camera.pixelHeight + resolution - 1) / resolution;
+            FilterMode filter = resolution > 1 ? FilterMode.Bilinear : FilterMode.Point;
+            if (!owned.Fits(width, height, format))
             {
                 owned.Release();
-                owned.layer = new RenderTexture(camera.pixelWidth, camera.pixelHeight, 0, format) { name = "Flame Layers", hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
-                owned.light = new RenderTexture(camera.pixelWidth, camera.pixelHeight, 0, format) { name = "Flame Light", hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
+                owned.layer = new RenderTexture(width, height, 0, format) { name = "Flame Layers", hideFlags = HideFlags.HideAndDontSave };
+                owned.light = new RenderTexture(width, height, 0, format) { name = "Flame Light", hideFlags = HideFlags.HideAndDontSave };
             }
+            owned.layer.filterMode = owned.light.filterMode = filter;
             owned.lastUsed = Time.frameCount;
 
             targets[0] = owned.layer;

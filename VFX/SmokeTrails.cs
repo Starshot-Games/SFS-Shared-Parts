@@ -42,8 +42,8 @@ namespace SFS.Parts.Modules
         const int MaxSegments = 16000; // drawn per frame, which also keeps the mesh within 16-bit indices
 
         // How many times coarser than the screen the smoke is accumulated at, before the composite spreads it back over it. 2 fills a quarter
-        // of the pixels, most of a frame on the pad, but zoomed far out it thickens the soft top of the cloud, so it is off for now
-        public static int downsample = 1;
+        // of the pixels, most of a frame on the pad
+        public static int downsample = 2;
         static readonly Dictionary<Material, SmokeTrails> renderers = new();
 
         public static SmokeTrail StartTrail(Material material, Planet planet, float side, float spreadPhase)
@@ -189,6 +189,8 @@ namespace SFS.Parts.Modules
 
         static class Compositor
         {
+            const int KeepUnused = 120; // frames the textures are kept without any smoke to draw
+
             static readonly List<SmokeTrails> renderers = new();
             static CommandBuffer buffer;
             static Camera attached;
@@ -198,6 +200,11 @@ namespace SFS.Parts.Modules
             static readonly RenderTargetIdentifier[] targets = new RenderTargetIdentifier[2];
             static Texture2D none;
             static bool? available;
+
+            // Owned, not temporary: those go back to the pool when the buffer ends, long before the quads read them, and the flame glows'
+            // half-resolution ones are the same kind, so at half resolution the two drew into each other's
+            static RenderTexture airborneTexture, accumulatedTexture;
+            static int lastUsed;
 
             public static bool Available
             {
@@ -281,6 +288,35 @@ namespace SFS.Parts.Modules
                 }
             }
 
+            static RenderTexture GetTexture(ref RenderTexture texture, string name, int width, int height, FilterMode filter)
+            {
+                if (texture == null || texture.width != width || texture.height != height)
+                {
+                    Release(ref texture);
+                    texture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGBHalf) { name = name, hideFlags = HideFlags.HideAndDontSave };
+                }
+
+                texture.filterMode = filter;
+                return texture;
+            }
+
+            static void Release(ref RenderTexture texture)
+            {
+                if (texture != null)
+                    Object.DestroyImmediate(texture);
+                texture = null;
+            }
+
+            #if UNITY_EDITOR
+            // A script reload forgets the textures, which would otherwise be left behind
+            [UnityEditor.InitializeOnLoadMethod]
+            static void ReleaseBeforeReload() => UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += () =>
+            {
+                Release(ref airborneTexture);
+                Release(ref accumulatedTexture);
+            };
+            #endif
+
             // Refills the buffer for the camera about to draw the world, with the trails and the origin where they are now
             static void Prepare(Camera camera)
             {
@@ -324,29 +360,37 @@ namespace SFS.Parts.Modules
                 Quad.enabled = any && (split || !Split);
                 AirborneQuad.enabled = any && Split;
                 if (!any)
+                {
+                    if (Time.frameCount - lastUsed > KeepUnused)
+                    {
+                        Release(ref airborneTexture);
+                        Release(ref accumulatedTexture);
+                    }
                     return;
+                }
+                lastUsed = Time.frameCount;
 
                 FilterMode filter = resolution > 1 ? FilterMode.Bilinear : FilterMode.Point;
+                int width = Mathf.Max(camera.pixelWidth / resolution, 1), height = Mathf.Max(camera.pixelHeight / resolution, 1);
                 int target = Split ? Airborne : Accumulated;
-                buffer.GetTemporaryRT(target, -resolution, -resolution, 0, filter, RenderTextureFormat.ARGBHalf);
+                RenderTexture texture = Split ? GetTexture(ref airborneTexture, "Smoke Airborne", width, height, filter) : GetTexture(ref accumulatedTexture, "Smoke Accumulated", width, height, filter);
                 if (split)
                 {
-                    buffer.GetTemporaryRT(Accumulated, -resolution, -resolution, 0, filter, RenderTextureFormat.ARGBHalf);
-                    targets[0] = Airborne;
-                    targets[1] = Accumulated;
+                    targets[0] = texture;
+                    targets[1] = GetTexture(ref accumulatedTexture, "Smoke Accumulated", width, height, filter);
                     buffer.SetRenderTarget(targets, targets[0]);
                 }
                 else
-                    buffer.SetRenderTarget(target);
+                    buffer.SetRenderTarget(texture);
                 buffer.ClearRenderTarget(false, true, Color.clear);
                 buffer.SetGlobalFloat(Resolution, resolution);
                 buffer.SetGlobalVector(ScreenRect, new Vector4(min.x, min.y, max.x, max.y));
                 foreach (SmokeTrails renderer in renderers)
                     if (renderer != null && renderer.HasSmoke)
                         buffer.DrawMesh(renderer.mesh, renderer.transform.localToWorldMatrix, renderer.material, 0, split ? AccumulateSplitPass : AccumulatePass, renderer.propertyBlock);
-                buffer.SetGlobalTexture(target, target);
+                buffer.SetGlobalTexture(target, texture);
                 if (split)
-                    buffer.SetGlobalTexture(Accumulated, Accumulated);
+                    buffer.SetGlobalTexture(Accumulated, accumulatedTexture);
                 buffer.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             }
         }

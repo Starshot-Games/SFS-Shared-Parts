@@ -28,6 +28,13 @@ namespace SFS.Parts.Modules
             // Re-apply the saved mode on load
             ApplyMode(CurrentIndex, false, false);
         }
+        
+        #if UNITY_EDITOR
+        void OnValidate()
+        {
+            ApplyMode(CurrentIndex, false, false);
+        }
+        #endif
 
         [Button(ButtonSizes.Medium)]
         public void CycleMode()
